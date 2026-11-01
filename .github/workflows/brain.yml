@@ -31,13 +31,26 @@ jobs:
       BRAIN_MODEL: ${{ vars.BRAIN_MODEL || 'claude-sonnet-5-5' }}
       TRADING_MODE: paper
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Check secrets are set
+        id: ready
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "Secrets not added yet (Settings > Secrets and variables > Actions). Skipping."
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.ready.outputs.ok == 'true'
+        uses: actions/checkout@v4
+      - if: steps.ready.outputs.ok == 'true'
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-      - run: pip install -r requirements.txt
+      - if: steps.ready.outputs.ok == 'true'
+        run: pip install -r requirements.txt
       - name: Run
+        if: steps.ready.outputs.ok == 'true'
         run: |
           ACTION="${{ github.event.inputs.action || 'review' }}"
           case "$ACTION" in
