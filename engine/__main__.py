@@ -90,10 +90,18 @@ def cmd_fetch_bars(a, s):
     dc = DataClient(s.alpaca_key, s.alpaca_secret)
     syms = sorted(x["symbol"] for x in tc.assets()
                   if x.get("tradable") and x.get("exchange") in EXCHANGES and "." not in x["symbol"])
+    # Rank by recent dollar volume and keep the most-traded names: the engines only ever trade
+    # the top 500, and the full market since 2016 would not fit a free 1 GB database.
+    recent = pd.DataFrame(list(dc.daily_bars(syms, a.end - timedelta(days=45), a.end)))
+    if recent.empty:
+        sys.exit("no recent bars returned; check the Alpaca keys and data feed")
+    dv = (recent["close"] * recent["volume"]).groupby(recent["symbol"]).mean()
+    keep = sorted(dv.sort_values(ascending=False).index[: a.top])
+    print(f"keeping the {len(keep)} most-traded of {len(syms)} symbols")
     total = 0
-    for i in range(0, len(syms), 200):
-        total += db.upsert_bars(dc.daily_bars(syms[i:i + 200], a.start, a.end))
-        print(f"bars stored: {total} ({min(i + 200, len(syms))}/{len(syms)} symbols)", end="\r")
+    for i in range(0, len(keep), 100):
+        total += db.upsert_bars(dc.daily_bars(keep[i:i + 100], a.start, a.end))
+        print(f"bars stored: {total} ({min(i + 100, len(keep))}/{len(keep)} symbols)", end="\r")
     print()
 
 
@@ -300,7 +308,9 @@ def main(argv=None):
     p.add_argument("--momentum-history-start", type=date.fromisoformat, default=date(2016, 1, 1))
     p.set_defaults(fn=cmd_audit)
     p = sub.add_parser("fetch-bars"); p.add_argument("start", type=date.fromisoformat)
-    p.add_argument("end", type=date.fromisoformat); p.set_defaults(fn=cmd_fetch_bars)
+    p.add_argument("end", type=date.fromisoformat)
+    p.add_argument("--top", type=int, default=1500, help="most-traded symbols to keep (default 1500)")
+    p.set_defaults(fn=cmd_fetch_bars)
     sub.add_parser("paper-gates").set_defaults(fn=cmd_paper_gates)
     sub.add_parser("test-kill-switch").set_defaults(fn=cmd_test_kill_switch)
     p = sub.add_parser("tick"); p.add_argument("--stage", choices=["premarket", "exits", "close"]); p.set_defaults(fn=cmd_tick)
