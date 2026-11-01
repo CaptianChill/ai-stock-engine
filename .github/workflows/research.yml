@@ -1,0 +1,59 @@
+name: replay-and-audit
+# Manual: fetch history, LLM-score the news, replay with costs, and run every audit gate.
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "Replay start (YYYY-MM-DD). Must be after the LLM knowledge cutoff."
+        required: true
+        default: "2026-07-02"
+      end:
+        description: "Replay end (YYYY-MM-DD)"
+        required: true
+      max_llm_calls:
+        description: "Cap on LLM scoring calls (cost control). Blank = no cap."
+        required: false
+        default: ""
+      skip_fetch:
+        description: "Skip downloading history (already stored)"
+        type: boolean
+        default: false
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
+      ALPACA_API_SECRET: ${{ secrets.ALPACA_API_SECRET }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      LLM_MODEL: ${{ vars.LLM_MODEL || 'claude-haiku-5-5' }}
+      LLM_KNOWLEDGE_CUTOFF: ${{ vars.LLM_KNOWLEDGE_CUTOFF || '2026-07-01' }}
+      ALPACA_DATA_FEED: ${{ vars.ALPACA_DATA_FEED || 'iex' }}
+      TRADING_MODE: paper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m engine init-db
+      - if: ${{ !inputs.skip_fetch }}
+        run: python -m engine fetch-history ${{ inputs.start }} ${{ inputs.end }}
+      - name: Score news
+        run: |
+          if [ -n "${{ inputs.max_llm_calls }}" ]; then
+            python -m engine score-news ${{ inputs.start }} ${{ inputs.end }} --max-calls ${{ inputs.max_llm_calls }}
+          else
+            python -m engine score-news ${{ inputs.start }} ${{ inputs.end }}
+          fi
+      - name: Replay
+        id: replay
+        run: |
+          python -m engine replay ${{ inputs.start }} ${{ inputs.end }} | tee replay.json
+          echo "run_id=$(python -c "import json;print(json.load(open('replay.json'))['run_id'])")" >> "$GITHUB_OUTPUT"
+      - run: python -m engine audit ${{ steps.replay.outputs.run_id }}
+      - run: python -m engine test-kill-switch
+      - run: python -m engine status
