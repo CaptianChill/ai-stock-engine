@@ -35,7 +35,25 @@ proposal number. Approving only creates a *candidate* version (e.g. `v1.0.0-p3`)
 `python -m engine replay START END --version v1.0.0-p3`, then `audit` the run. It trades only if it
 passes every gate and you switch `ACTIVE_VERSION` in `engine/config.py` to it.
 
-## Setup (once)
+## Running on your Windows PC (current setup)
+
+The schedule runs on your own PC through Windows Task Scheduler (GitHub's scheduled runs are off).
+
+1. Open **PowerShell** and run:
+   ```
+   irm https://raw.githubusercontent.com/CaptianChill/ai-stock-engine/main/windows/setup.ps1 -OutFile $env:TEMP\ase-setup.ps1; powershell -ExecutionPolicy Bypass -File $env:TEMP\ase-setup.ps1
+   ```
+   It installs Python 3.12 and Git if needed, downloads the code to `%USERPROFILE%\ai-stock-engine`,
+   asks for your four keys (hidden typing, saved only in `.env` on this PC), runs the tests, checks
+   the database, and registers two tasks:
+   - **AI Stock Engine - Trader**: every 10 min, weekdays 6:30 AM-5:30 PM (wakes the PC).
+   - **AI Stock Engine - Brain**: weekdays 6:15 PM.
+2. Start the first validation run: `%USERPROFILE%\ai-stock-engine\windows\research.cmd` (a few hours).
+3. Check on things any time: `windows\status.cmd`. Logs are in the `logs` folder.
+
+The PC must be on, or asleep with wake timers allowed, on weekday mornings and afternoons.
+
+## Setup on GitHub Actions (alternative)
 
 1. **Push this folder to a new private GitHub repo** (e.g. `CaptianChill/ai-stock-engine`).
 2. **Accounts/keys you need:**

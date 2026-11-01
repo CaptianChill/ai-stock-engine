@@ -2,9 +2,8 @@ name: review-brain
 # Nightly at 22:45 UTC on weekdays (after the 16:30 New York close stage in both EST and EDT):
 # data watchdog, LLM-scorer accuracy check, written review, up to 3 proposals.
 # Run it by hand to approve or reject a proposal (approval only makes a TEST candidate).
+# Scheduling now runs on the Windows PC (see windows/). Manual runs still work here.
 on:
-  schedule:
-    - cron: "45 22 * * 1-5"
   workflow_dispatch:
     inputs:
       action:

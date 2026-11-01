@@ -9,6 +9,7 @@
   paper-gates                     run the paper-trading gates and record results
   test-kill-switch                prove the kill switch and loss stop block entries
   tick [--stage S]                scheduler entry point (paper unless unlocked for live)
+  research START END [--max-calls N] [--skip-fetch]   the whole validation run in one go
   status                          gates, kill switch, open positions, latest equity
   kill "reason" / release         engage or release the kill switch
   brain                           nightly review: watchdog, scorer check, written review, proposals
@@ -34,6 +35,13 @@ NY = ZoneInfo("America/New_York")
 def _db(settings):
     from .db import DB
     return DB(settings.database_url)
+
+
+def _last_weekday() -> date:
+    d = date.today() - timedelta(days=1)
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    return d
 
 
 def _history_start(start: date) -> date:
@@ -156,6 +164,24 @@ def cmd_replay(a, s):
     m["momentum"] = metrics(res.momentum_daily, [t for t in res.trades if t["engine"] == "momentum"])
     run_id = db.save_replay(sv.version, a.start, a.end, sv.costs.cost_bps_per_side, m, res.daily, res.trades)
     print(json.dumps({"run_id": run_id, **m}, indent=2, default=str))
+    return run_id
+
+
+def cmd_research(a, s):
+    """The whole validation run in one command (what the replay-and-audit workflow does):
+    price history, news, LLM scoring, replay, every audit gate, kill-switch self-test, status."""
+    from argparse import Namespace as N
+    print("== init-db"); cmd_init_db(N(), s)
+    if not a.skip_fetch:
+        print(f"== fetch-bars {a.momentum_history_start} {a.end}")
+        cmd_fetch_bars(N(start=a.momentum_history_start, end=a.end, top=1500), s)
+        print(f"== fetch-history {a.start} {a.end}")
+        cmd_fetch_history(N(start=a.start, end=a.end), s)
+    print("== score-news"); cmd_score_news(N(start=a.start, end=a.end, max_calls=a.max_calls), s)
+    print("== replay"); run_id = cmd_replay(N(start=a.start, end=a.end, version=None), s)
+    print(f"== audit {run_id}"); cmd_audit(N(run_id=run_id, momentum_history_start=a.momentum_history_start), s)
+    print("== test-kill-switch"); cmd_test_kill_switch(N(), s)
+    print("== status"); cmd_status(N(), s)
 
 
 def cmd_audit(a, s):
@@ -315,6 +341,14 @@ def main(argv=None):
     sub.add_parser("test-kill-switch").set_defaults(fn=cmd_test_kill_switch)
     p = sub.add_parser("tick"); p.add_argument("--stage", choices=["premarket", "exits", "close"]); p.set_defaults(fn=cmd_tick)
     sub.add_parser("status").set_defaults(fn=cmd_status)
+    p = sub.add_parser("research", help="full validation run: history, scoring, replay, audit")
+    p.add_argument("start", type=date.fromisoformat)
+    p.add_argument("end", type=date.fromisoformat, nargs="?", default=_last_weekday(),
+                   help="default: the most recent weekday before today")
+    p.add_argument("--max-calls", type=int, default=None)
+    p.add_argument("--momentum-history-start", type=date.fromisoformat, default=date(2016, 1, 1))
+    p.add_argument("--skip-fetch", action="store_true")
+    p.set_defaults(fn=cmd_research)
     sub.add_parser("brain").set_defaults(fn=cmd_brain)
     sub.add_parser("report").set_defaults(fn=cmd_report)
     p = sub.add_parser("proposals"); p.add_argument("--all", action="store_true"); p.set_defaults(fn=cmd_proposals)

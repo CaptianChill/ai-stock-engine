@@ -2,9 +2,8 @@ name: trading-tick
 # Every 10 minutes on weekdays during US market-adjacent hours (UTC). The engine reads the
 # New York clock itself and runs whichever stage is due, once per day, so DST shifts and
 # late or duplicate scheduler runs are harmless.
+# Scheduling now runs on the Windows PC (see windows/). Manual runs still work here.
 on:
-  schedule:
-    - cron: "*/10 12-22 * * 1-5"
   workflow_dispatch:
     inputs:
       stage:
