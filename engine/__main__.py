@@ -4,7 +4,8 @@
   fetch-history START END         daily bars (from ~13 months before START) + news for START..END
   score-news START END [--max-calls N]   LLM-score news for symbols in the tradeable universe
   replay START END                run the replay with costs, store it, print metrics
-  audit RUN_ID                    run every replay gate on a stored run and record results
+  fetch-bars START END            price history only (for the long momentum check, e.g. from 2016)
+  audit RUN_ID [--momentum-history-start 2016-01-01]   run every replay gate and record results
   paper-gates                     run the paper-trading gates and record results
   test-kill-switch                prove the kill switch and loss stop block entries
   tick [--stage S]                scheduler entry point (paper unless unlocked for live)
@@ -80,6 +81,22 @@ def cmd_fetch_history(a, s):
     print(f"\nnews stored: {n}")
 
 
+def cmd_fetch_bars(a, s):
+    """Price history only (no news): for the long-history momentum check."""
+    from .alpaca import DataClient, TradingClient
+    from .runner import EXCHANGES
+    db = _db(s)
+    tc = TradingClient(s.alpaca_key, s.alpaca_secret, live=False)
+    dc = DataClient(s.alpaca_key, s.alpaca_secret)
+    syms = sorted(x["symbol"] for x in tc.assets()
+                  if x.get("tradable") and x.get("exchange") in EXCHANGES and "." not in x["symbol"])
+    total = 0
+    for i in range(0, len(syms), 200):
+        total += db.upsert_bars(dc.daily_bars(syms[i:i + 200], a.start, a.end))
+        print(f"bars stored: {total} ({min(i + 200, len(syms))}/{len(syms)} symbols)", end="\r")
+    print()
+
+
 def _universe_union(bars, sv, from_day: date) -> set[str]:
     """Every symbol eligible on any day from `from_day` on: only these get LLM calls."""
     from . import strategies as st
@@ -149,8 +166,10 @@ def cmd_audit(a, s):
         for o in others:
             latest[o["version"]] = o["daily_returns"]
         variants = pd.DataFrame(latest).sort_index().fillna(0.0)
+    long_bars = db.load_bars(a.momentum_history_start, end) if sv.momentum_weight > 0 else None
     _, gates = run_replay_gates(bars, scores, sv, start, s.llm_knowledge_cutoff,
-                                n_trials=db.count_versions(), variants=variants, period_end=end)
+                                n_trials=db.count_versions(), variants=variants, period_end=end,
+                                long_bars=long_bars)
     for g in gates:
         db.save_audit(sv.version, a.run_id, g.gate, g.passed, g.detail)
         print(f"{'PASS' if g.passed else 'FAIL'}  {g.gate}")
@@ -277,7 +296,11 @@ def main(argv=None):
         if name == "replay":
             p.add_argument("--version", help="replay a registered candidate version instead of the active one")
         p.set_defaults(fn=fn)
-    p = sub.add_parser("audit"); p.add_argument("run_id", type=int); p.set_defaults(fn=cmd_audit)
+    p = sub.add_parser("audit"); p.add_argument("run_id", type=int)
+    p.add_argument("--momentum-history-start", type=date.fromisoformat, default=date(2016, 1, 1))
+    p.set_defaults(fn=cmd_audit)
+    p = sub.add_parser("fetch-bars"); p.add_argument("start", type=date.fromisoformat)
+    p.add_argument("end", type=date.fromisoformat); p.set_defaults(fn=cmd_fetch_bars)
     sub.add_parser("paper-gates").set_defaults(fn=cmd_paper_gates)
     sub.add_parser("test-kill-switch").set_defaults(fn=cmd_test_kill_switch)
     p = sub.add_parser("tick"); p.add_argument("--stage", choices=["premarket", "exits", "close"]); p.set_defaults(fn=cmd_tick)

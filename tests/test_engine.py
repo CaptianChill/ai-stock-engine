@@ -221,3 +221,24 @@ def test_risk_cap_counts_shares_already_held_by_other_engine():
     full = rk.check(_buy(notional=10_000), equity=100_000, gross_exposure=10_000, kill_switch_engaged=False,
                     entries_halted=False, held_symbols={"AAA": 200}, p=P)
     assert not full.approved
+
+
+# -- long-history momentum gate ---------------------------------------------------------
+from engine.audit.gates import gate_momentum_history, momentum_only
+
+
+def test_momentum_history_gate_passes_real_trend_fails_noise_and_missing_data():
+    sv = make_version()
+    long_trend, _, _ = make_market(n_days=1700, trend_symbols=5, edge=0.0, news_per_day=1, seed=9)
+    g = gate_momentum_history(long_trend, sv, n_trials=3)
+    assert g.passed, g.detail["checks"]
+    assert g.detail["rebalances"] >= 60
+    long_noise, _, _ = make_market(n_days=1700, trend_symbols=0, edge=0.0, news_per_day=1, seed=10)
+    assert not gate_momentum_history(long_noise, sv, n_trials=3).passed
+    assert not gate_momentum_history(None, sv, n_trials=3).passed
+    assert gate_momentum_history(None, make_version(momentum_weight=0.0, news_weight=1.0), 3).passed
+
+
+def test_momentum_only_drops_news_and_veto():
+    mv = momentum_only(make_version())
+    assert mv.news_weight == 0 and mv.momentum_weight == 1 and mv.momentum.llm_veto is False

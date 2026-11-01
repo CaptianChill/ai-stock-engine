@@ -14,6 +14,10 @@ on:
         description: "Cap on LLM scoring calls (cost control). Blank = no cap."
         required: false
         default: ""
+      momentum_history_start:
+        description: "Start of price history for the long momentum check"
+        required: false
+        default: "2016-01-01"
       skip_fetch:
         description: "Skip downloading history (already stored)"
         type: boolean
@@ -41,6 +45,8 @@ jobs:
       - run: pip install -r requirements.txt
       - run: python -m engine init-db
       - if: ${{ !inputs.skip_fetch }}
+        run: python -m engine fetch-bars ${{ inputs.momentum_history_start }} ${{ inputs.end }}
+      - if: ${{ !inputs.skip_fetch }}
         run: python -m engine fetch-history ${{ inputs.start }} ${{ inputs.end }}
       - name: Score news
         run: |
@@ -54,6 +60,6 @@ jobs:
         run: |
           python -m engine replay ${{ inputs.start }} ${{ inputs.end }} | tee replay.json
           echo "run_id=$(python -c "import json;print(json.load(open('replay.json'))['run_id'])")" >> "$GITHUB_OUTPUT"
-      - run: python -m engine audit ${{ steps.replay.outputs.run_id }}
+      - run: python -m engine audit ${{ steps.replay.outputs.run_id }} --momentum-history-start ${{ inputs.momentum_history_start }}
       - run: python -m engine test-kill-switch
       - run: python -m engine status

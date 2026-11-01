@@ -23,11 +23,11 @@ MAX_SYMBOL_SHARE = 0.25
 MAX_DAY_SHARE = 0.25
 MIN_DAYS = 60
 MIN_NEWS_TRADES = 100
-MIN_REBALANCES = 12
+MIN_REBALANCES = 60          # 5 years of monthly momentum rebalances, from long price history
 PAPER_MIN_FILLS = 5
 
 REPLAY_GATES = ["no_lookahead", "cost_stress", "out_of_sample", "overfitting", "decay_haircut",
-                "concentration", "min_sample", "independent_reproduction"]
+                "concentration", "min_sample", "independent_reproduction", "momentum_history"]
 PAPER_GATES = ["paper_run_completed", "paper_match", "kill_switch_tested"]
 ALL_GATES = REPLAY_GATES + PAPER_GATES
 
@@ -134,9 +134,45 @@ def gate_min_sample(res: ReplayResult, sv: StrategyVersion) -> GateResult:
     ok = len(res.daily) >= MIN_DAYS
     if sv.news_weight > 0:
         ok = ok and n_news >= MIN_NEWS_TRADES
-    if sv.momentum_weight > 0:
-        ok = ok and n_reb >= MIN_REBALANCES
-    return GateResult("min_sample", ok, {"days": len(res.daily), "news_trades": n_news, "rebalances": n_reb})
+    # Momentum's sample size is judged on years of price history in gate_momentum_history.
+    return GateResult("min_sample", ok, {"days": len(res.daily), "news_trades": n_news,
+                                         "rebalances_in_window": n_reb})
+
+
+def momentum_only(sv: StrategyVersion) -> StrategyVersion:
+    """The core engine alone, without the LLM veto: needs no news, so it can be judged on
+    years of history instead of the few months after the LLM's training cutoff."""
+    from dataclasses import replace
+    return replace(sv, version=f"{sv.version}-mom-base", news_weight=0.0, momentum_weight=1.0,
+                   momentum=replace(sv.momentum, llm_veto=False))
+
+
+def gate_momentum_history(long_bars: pd.DataFrame | None, sv: StrategyVersion, n_trials: int) -> GateResult:
+    """Base momentum over long history must be: >= 60 rebalances, profitable at 2x costs,
+    profitable in its last 40%, and pass the deflated Sharpe hurdle."""
+    if sv.momentum_weight <= 0:
+        return GateResult("momentum_history", True, {"note": "momentum engine not used"})
+    if long_bars is None or long_bars.empty:
+        return GateResult("momentum_history", False, {"issue": "no long price history supplied"})
+    from ..strategies import rebalance_days
+    mv = momentum_only(sv)
+    days = sorted(pd.to_datetime(long_bars["day"]).dt.date.unique())
+    start = days[min(len(days) - 1, mv.momentum.lookback_days + 1)]
+    empty = pd.DataFrame(columns=["published_at", "symbol", "score", "confidence"])
+    res = run_replay(long_bars, empty, mv, use_news=False, start=start)
+    stressed = run_replay(long_bars, empty, mv, use_news=False, start=start,
+                          cost_bps=sv.costs.cost_bps_per_side * sv.costs.stress_multiplier)
+    m, ms = metrics(res.daily, res.trades), metrics(stressed.daily)
+    cut = int(len(res.daily) * (1 - OOS_FRACTION))
+    oos = metrics(res.daily.iloc[cut:])
+    dsr = stats.deflated_sharpe(res.daily.values, max(n_trials, 1))
+    n_reb = len(rebalance_days(list(res.daily.index)))
+    checks = {"rebalances>=60": n_reb >= MIN_REBALANCES, "profitable_at_2x_costs": ms["annual_return"] > 0,
+              "last_40pct_profitable": oos["sharpe"] > 0 and oos["total_return"] > 0,
+              "deflated_sharpe>=0.95": dsr["dsr"] >= DSR_MIN}
+    return GateResult("momentum_history", all(checks.values()),
+                      {"checks": checks, "rebalances": n_reb, "period": [str(res.daily.index[0]), str(res.daily.index[-1])],
+                       "metrics": m, "stressed_annual_return": ms["annual_return"], "oos": oos, "deflated_sharpe": dsr})
 
 
 def gate_independent(bars: pd.DataFrame, res: ReplayResult, sv: StrategyVersion) -> GateResult:
@@ -149,8 +185,8 @@ def gate_independent(bars: pd.DataFrame, res: ReplayResult, sv: StrategyVersion)
 
 def run_replay_gates(bars: pd.DataFrame, scores: pd.DataFrame, sv: StrategyVersion, period_start: date,
                      llm_cutoff: date, n_trials: int, variants: pd.DataFrame | None = None,
-                     res: ReplayResult | None = None,
-                     period_end: date | None = None) -> tuple[ReplayResult, list[GateResult]]:
+                     res: ReplayResult | None = None, period_end: date | None = None,
+                     long_bars: pd.DataFrame | None = None) -> tuple[ReplayResult, list[GateResult]]:
     res = res or run_replay(bars, scores, sv, start=period_start, end=period_end)
     gates = [
         gate_no_lookahead(res, scores, sv, period_start, llm_cutoff),
@@ -161,6 +197,7 @@ def run_replay_gates(bars: pd.DataFrame, scores: pd.DataFrame, sv: StrategyVersi
         gate_concentration(res),
         gate_min_sample(res, sv),
         gate_independent(bars, res, sv),
+        gate_momentum_history(long_bars, sv, n_trials),
     ]
     return res, gates
 

@@ -47,16 +47,25 @@ class DataClient(_Base):
         super().__init__(key, secret)
         self.feed = feed or os.environ.get("ALPACA_DATA_FEED", "iex")
 
-    def daily_bars(self, symbols: list[str], start: date, end: date) -> Iterator[dict]:
-        """Split- and dividend-adjusted daily bars, chunked 100 symbols per request."""
+    def daily_bars(self, symbols: list[str], start: date, end: date, feed: str | None = None) -> Iterator[dict]:
+        """Split- and dividend-adjusted daily bars, chunked 100 symbols per request.
+        History defaults to the SIP feed (full market volume; free plans get it except the
+        latest 15 minutes) and falls back to IEX if the account isn't allowed SIP."""
+        feed = feed or os.environ.get("ALPACA_HISTORY_FEED", "sip")
         for i in range(0, len(symbols), 100):
             chunk = symbols[i:i + 100]
             params = {
                 "symbols": ",".join(chunk), "timeframe": "1Day", "start": start.isoformat(),
-                "end": end.isoformat(), "limit": 10000, "adjustment": "all", "feed": self.feed,
+                "end": end.isoformat(), "limit": 10000, "adjustment": "all", "feed": feed,
             }
             while True:
-                j = self._req("GET", f"{DATA_URL}/v2/stocks/bars", params=params)
+                try:
+                    j = self._req("GET", f"{DATA_URL}/v2/stocks/bars", params=params)
+                except AlpacaError as e:
+                    if params["feed"] != "iex" and ("403" in str(e) or "subscription" in str(e).lower()):
+                        feed = params["feed"] = "iex"
+                        continue
+                    raise
                 for sym, bars in (j.get("bars") or {}).items():
                     for b in bars:
                         yield {"symbol": sym, "day": b["t"][:10], "open": b["o"], "high": b["h"],

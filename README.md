@@ -76,7 +76,8 @@ overfitting gate (deflated Sharpe), so tuning until it passes gets harder on pur
 | overfitting | deflated Sharpe ≥ 0.95 given every version tried; PBO ≤ 0.5 once ≥2 variants exist |
 | decay_haircut | still profitable with half the measured edge |
 | concentration | no stock > 25% of profit, no day > 25% of profit |
-| min_sample | ≥ 60 days, ≥ 100 news trades, ≥ 12 momentum rebalances |
+| min_sample | ≥ 60 days and ≥ 100 news trades in the replay window |
+| momentum_history | base momentum (no LLM) since 2016: ≥ 60 rebalances, profitable at 2× costs, last 40% profitable, deflated Sharpe ≥ 0.95 |
 | independent_reproduction | a separate implementation re-derives every trade from raw bars and agrees |
 | paper_run_completed | at least one full paper trading day |
 | paper_match | ≥ 5 fills; average fill vs official open/close within assumed cost |
@@ -85,18 +86,20 @@ overfitting gate (deflated Sharpe), so tuning until it passes gets harder on pur
 ## Known limits (read before trusting any number)
 
 - **Short LLM history.** News on or before the model's training cutoff can't be used (the model may
-  have seen the outcome), so the news engine's replay covers only a few months. The `min_sample` and
-  `momentum` gates (12 rebalances) may not pass until more time has passed. That is the honest answer.
+  have seen the outcome), so the news engine's replay covers only a few months. Momentum is judged
+  separately on price history since 2016 (no LLM involved, so no cutoff problem); the LLM veto on top
+  of it is only judged in the short window.
 - **Survivorship bias.** History is fetched for currently listed stocks; delisted names are missing,
   which flatters momentum results.
-- **IEX feed volume** is a fraction of total market volume; the universe ranks relative liquidity
-  correctly but dollar-volume thresholds are on IEX volume. A paid `sip` feed fixes this.
+- **Data feeds.** Price history uses Alpaca's SIP feed (full market volume; free plans get it except
+  the latest 15 minutes) and falls back to IEX if refused. Live snapshots use IEX.
 - Entry/exit use market-on-open/close auctions so paper fills are comparable to the replay.
 
 ## Commands
 
 ```
 python -m engine init-db
+python -m engine fetch-bars 2016-01-01 2026-10-30
 python -m engine fetch-history 2026-07-02 2026-10-30
 python -m engine score-news 2026-07-02 2026-10-30 --max-calls 5000
 python -m engine replay 2026-07-02 2026-10-30
