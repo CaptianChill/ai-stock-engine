@@ -1,0 +1,47 @@
+name: review-brain
+# Nightly at 22:45 UTC on weekdays (after the 16:30 New York close stage in both EST and EDT):
+# data watchdog, LLM-scorer accuracy check, written review, up to 3 proposals.
+# Run it by hand to approve or reject a proposal (approval only makes a TEST candidate).
+on:
+  schedule:
+    - cron: "45 22 * * 1-5"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "review (default) | approve | reject"
+        required: false
+        default: "review"
+      proposal_id:
+        description: "Proposal number, for approve/reject"
+        required: false
+        default: ""
+
+concurrency:
+  group: review-brain
+  cancel-in-progress: false
+
+jobs:
+  brain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      LLM_MODEL: ${{ vars.LLM_MODEL || 'claude-haiku-5-5' }}
+      BRAIN_MODEL: ${{ vars.BRAIN_MODEL || 'claude-sonnet-5-5' }}
+      TRADING_MODE: paper
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run
+        run: |
+          ACTION="${{ github.event.inputs.action || 'review' }}"
+          case "$ACTION" in
+            approve) python -m engine approve "${{ github.event.inputs.proposal_id }}" ;;
+            reject)  python -m engine reject "${{ github.event.inputs.proposal_id }}" ;;
+            *)       python -m engine brain && python -m engine report && python -m engine proposals ;;
+          esac

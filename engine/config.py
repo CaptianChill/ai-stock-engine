@@ -67,6 +67,22 @@ class StrategyVersion:
     def to_json(self) -> dict:
         return asdict(self)
 
+    @classmethod
+    def from_json(cls, d: dict) -> "StrategyVersion":
+        return cls(version=d["version"], news_weight=d["news_weight"], momentum_weight=d["momentum_weight"],
+                   news=NewsParams(**d["news"]), momentum=MomentumParams(**d["momentum"]),
+                   risk=RiskParams(**d["risk"]), costs=CostParams(**d["costs"]))
+
+    def get_param(self, path: str):
+        group, name = path.split(".")
+        return getattr(getattr(self, group), name)
+
+    def with_param(self, path: str, value, new_version: str) -> "StrategyVersion":
+        """A copy with one parameter changed and a new version name (versions are immutable)."""
+        from dataclasses import replace
+        group, name = path.split(".")
+        return replace(self, version=new_version, **{group: replace(getattr(self, group), **{name: value})})
+
 
 # The active version. Bump the string whenever any parameter above changes.
 ACTIVE_VERSION = StrategyVersion(version="v1.0.0")

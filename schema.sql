@@ -147,3 +147,27 @@ create table if not exists monitor_alerts (
   kind       text not null,
   detail     jsonb not null
 );
+
+-- Review brain: nightly reports and the proposal queue. The brain can only write here;
+-- it has no access to order placement.
+create table if not exists brain_reports (
+  report_id   bigserial primary key,
+  report_day  date not null unique,
+  facts       jsonb not null,
+  review      jsonb not null,
+  model       text,
+  created_at  timestamptz not null default now()
+);
+
+create table if not exists brain_proposals (
+  proposal_id       bigserial primary key,
+  report_id         bigint references brain_reports(report_id),
+  param             text not null,
+  old_value         jsonb not null,
+  new_value         jsonb not null,
+  rationale         text not null,
+  status            text not null default 'pending' check (status in ('pending','approved','rejected')),
+  candidate_version text,
+  created_at        timestamptz not null default now(),
+  decided_at        timestamptz
+);

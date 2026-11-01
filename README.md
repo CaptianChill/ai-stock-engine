@@ -15,6 +15,26 @@ say, and audit gates that keep it on paper until the evidence is in.
 
 Not financial advice. Passing tests proves the machinery is correct, not that the strategy makes money.
 
+## Review brain (runs on its own every weekday night)
+
+After the close, the *review-brain* workflow runs with no one involved:
+
+1. **Data watchdog**: missing bars, thin news feed, failed stages, stuck or errored orders.
+2. **Scorer check**: over the last 30 days, did headlines the LLM called "good" beat the ones it
+   called "bad"? If not, it raises an urgent alert: the scorer has stopped working.
+3. **Trading review**: fills, slippage vs the cost model, equity, alerts, gate status.
+4. **Written review + proposals**: Claude writes findings and may propose up to 3 parameter changes,
+   only from an allow-list with hard bounds (risk limits can only be tightened).
+
+The brain **cannot** place, size or cancel orders, change the active strategy, or release the kill
+switch (a test fails if its code ever imports the order path). Its output goes to `brain_reports`,
+`brain_proposals` and urgent items to `monitor_alerts`.
+
+**Proposals wait for you.** Actions → *review-brain* → Run → action `approve` (or `reject`) + the
+proposal number. Approving only creates a *candidate* version (e.g. `v1.0.0-p3`) for testing:
+`python -m engine replay START END --version v1.0.0-p3`, then `audit` the run. It trades only if it
+passes every gate and you switch `ACTIVE_VERSION` in `engine/config.py` to it.
+
 ## Setup (once)
 
 1. **Push this folder to a new private GitHub repo** (e.g. `CaptianChill/ai-stock-engine`).
@@ -26,7 +46,8 @@ Not financial advice. Passing tests proves the machinery is correct, not that th
 3. **GitHub repo → Settings → Secrets and variables → Actions:**
    - Secrets: `DATABASE_URL`, `ALPACA_API_KEY`, `ALPACA_API_SECRET`, `ANTHROPIC_API_KEY`
    - Variables (optional): `LLM_MODEL` (default `claude-haiku-5-5`), `LLM_KNOWLEDGE_CUTOFF`
-     (set to the pinned model's published training cutoff; default `2026-07-01`), `ALPACA_DATA_FEED`.
+     (set to the pinned model's published training cutoff; default `2026-07-01`), `ALPACA_DATA_FEED`,
+     `BRAIN_MODEL` (default `claude-sonnet-5-5`).
 
 ## The compressed validation run
 
@@ -85,5 +106,6 @@ python -m engine paper-gates
 python -m engine tick [--stage premarket|exits|close]
 python -m engine status
 python -m engine kill "reason" | release
+python -m engine brain | report | proposals [--all] | approve ID | reject ID
 python -m pytest -q
 ```

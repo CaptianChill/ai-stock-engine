@@ -10,6 +10,9 @@
   tick [--stage S]                scheduler entry point (paper unless unlocked for live)
   status                          gates, kill switch, open positions, latest equity
   kill "reason" / release         engage or release the kill switch
+  brain                           nightly review: watchdog, scorer check, written review, proposals
+  report                          print the latest brain report
+  proposals [--all] / approve ID / reject ID   the brain's proposal queue (approve = test only)
 """
 from __future__ import annotations
 
@@ -34,6 +37,17 @@ def _db(settings):
 
 def _history_start(start: date) -> date:
     return start - timedelta(days=int(ACTIVE_VERSION.momentum.lookback_days * 1.6) + 30)
+
+
+def _version(db, name: str | None):
+    """The active version, or a registered candidate (e.g. one the brain proposed and you approved)."""
+    from .config import StrategyVersion
+    if not name or name == ACTIVE_VERSION.version:
+        return ACTIVE_VERSION
+    params = db.version_params(name)
+    if params is None:
+        sys.exit(f"strategy version {name} is not registered")
+    return StrategyVersion.from_json(params)
 
 
 def cmd_init_db(a, s):
@@ -108,7 +122,7 @@ def _load_inputs(db, s, start: date, end: date):
 def cmd_replay(a, s):
     from .replay import metrics, run_replay
     db = _db(s)
-    sv = ACTIVE_VERSION
+    sv = _version(db, a.version)
     db.register_version(sv.version, "combined", sv.to_json())
     bars, scores = _load_inputs(db, s, a.start, a.end)
     res = run_replay(bars, scores, sv, start=a.start, end=a.end)
@@ -122,12 +136,10 @@ def cmd_replay(a, s):
 def cmd_audit(a, s):
     from .audit.gates import run_replay_gates
     db = _db(s)
-    sv = ACTIVE_VERSION
     run = db.load_replay(a.run_id)
     if run is None:
         sys.exit(f"no replay run {a.run_id}")
-    if run["version"] != sv.version:
-        sys.exit(f"run {a.run_id} is version {run['version']}, active version is {sv.version}")
+    sv = _version(db, run["version"])
     start, end = run["period_start"], run["period_end"]
     bars, scores = _load_inputs(db, s, start, end)
     variants = None
@@ -179,6 +191,54 @@ def cmd_test_kill_switch(a, s):
     print(("PASS " if ok else "FAIL ") + json.dumps(results))
 
 
+def cmd_brain(a, s):
+    from . import brain
+    import os
+    mode = "live" if s.is_live else "paper"
+    out = brain.nightly(_db(s), ACTIVE_VERSION, mode, s.anthropic_key,
+                        os.environ.get("BRAIN_MODEL", "claude-sonnet-5-5"), s.llm_model, s.llm_prompt_version)
+    print(json.dumps(out, indent=2, default=str))
+
+
+def cmd_report(a, s):
+    r = _db(s).latest_brain_report()
+    if not r:
+        print("no brain report yet")
+        return
+    rv = r["review"]
+    print(f"Brain report for {r['report_day']} ({r['model'] or 'deterministic checks only'})\n")
+    print(rv.get("summary", ""), "\n")
+    for f in rv.get("findings", []):
+        print(f"[{f.get('severity', '?').upper()}] {f.get('title')}: {f.get('detail')}")
+    q = r["facts"].get("scorer_quality_30d", {})
+    print(f"\nLLM scorer, last 30 days: {json.dumps(q, default=str)}")
+
+
+def cmd_proposals(a, s):
+    rows = _db(s).list_proposals(None if a.all else "pending")
+    if not rows:
+        print("no proposals" + ("" if a.all else " pending"))
+    for p in rows:
+        print(f"#{p['proposal_id']} [{p['status']}] {p['param']}: {p['old_value']} -> {p['new_value']}"
+              f"{'  candidate ' + p['candidate_version'] if p['candidate_version'] else ''}\n    {p['rationale']}")
+
+
+def cmd_approve(a, s):
+    from . import brain
+    name = brain.approve(_db(s), a.proposal_id, ACTIVE_VERSION)
+    print(f"Approved for TESTING as candidate version {name}. It is not trading.\n"
+          f"Next: python -m engine replay START END --version {name}, then audit the run.")
+
+
+def cmd_reject(a, s):
+    db = _db(s)
+    p = db.get_proposal(a.proposal_id)
+    if p is None or p["status"] != "pending":
+        sys.exit(f"proposal {a.proposal_id} is not pending")
+    db.decide_proposal(a.proposal_id, "rejected")
+    print("rejected")
+
+
 def cmd_tick(a, s):
     from .runner import Runner
     print(json.dumps(Runner(s, _db(s)).tick(force_stage=a.stage), default=str))
@@ -214,12 +274,19 @@ def main(argv=None):
         p.add_argument("end", type=date.fromisoformat)
         if name == "score-news":
             p.add_argument("--max-calls", type=int)
+        if name == "replay":
+            p.add_argument("--version", help="replay a registered candidate version instead of the active one")
         p.set_defaults(fn=fn)
     p = sub.add_parser("audit"); p.add_argument("run_id", type=int); p.set_defaults(fn=cmd_audit)
     sub.add_parser("paper-gates").set_defaults(fn=cmd_paper_gates)
     sub.add_parser("test-kill-switch").set_defaults(fn=cmd_test_kill_switch)
     p = sub.add_parser("tick"); p.add_argument("--stage", choices=["premarket", "exits", "close"]); p.set_defaults(fn=cmd_tick)
     sub.add_parser("status").set_defaults(fn=cmd_status)
+    sub.add_parser("brain").set_defaults(fn=cmd_brain)
+    sub.add_parser("report").set_defaults(fn=cmd_report)
+    p = sub.add_parser("proposals"); p.add_argument("--all", action="store_true"); p.set_defaults(fn=cmd_proposals)
+    p = sub.add_parser("approve"); p.add_argument("proposal_id", type=int); p.set_defaults(fn=cmd_approve)
+    p = sub.add_parser("reject"); p.add_argument("proposal_id", type=int); p.set_defaults(fn=cmd_reject)
     p = sub.add_parser("kill"); p.add_argument("reason"); p.set_defaults(
         fn=lambda a, s: _db(s).set_kill_switch(True, a.reason))
     sub.add_parser("release").set_defaults(fn=lambda a, s: _db(s).set_kill_switch(False, "released by user"))

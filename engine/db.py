@@ -301,6 +301,72 @@ class DB:
             return c.execute("select status, detail from run_state where stage=%s order by ran_at desc limit 1",
                              (stage,)).fetchone()
 
+    # -- review brain ------------------------------------------------------------
+    def news_counts_by_day(self, start: date, end: date) -> pd.Series:
+        with self.conn() as c:
+            rows = c.execute(
+                """select (published_at at time zone 'America/New_York')::date as d, count(*) as n from news
+                   where published_at >= %s and published_at < %s + 1 group by 1 order by 1""", (start, end)).fetchall()
+        return pd.Series({r["d"]: r["n"] for r in rows}, dtype=float)
+
+    def recent_stages(self, since: date) -> list[dict]:
+        with self.conn() as c:
+            return c.execute("select trade_day, stage, status, detail from run_state where trade_day >= %s "
+                             "order by trade_day, stage", (since,)).fetchall()
+
+    def recent_alerts(self, since: date) -> list[dict]:
+        with self.conn() as c:
+            return c.execute("select raised_at, kind, detail from monitor_alerts where raised_at >= %s "
+                             "order by raised_at desc limit 50", (since,)).fetchall()
+
+    def decision_summary(self, day: date) -> dict:
+        with self.conn() as c:
+            rows = c.execute("""select engine, side, risk_status, count(*) as n from decisions where trade_day=%s
+                                group by 1, 2, 3""", (day,)).fetchall()
+        return {f"{r['engine']}/{r['side']}/{r['risk_status']}": r["n"] for r in rows}
+
+    def save_brain_report(self, day: date, facts: dict, review: dict, model: str | None) -> int:
+        with self.conn() as c:
+            return c.execute(
+                """insert into brain_reports (report_day, facts, review, model) values (%s, %s, %s, %s)
+                   on conflict (report_day) do update set facts=excluded.facts, review=excluded.review,
+                   model=excluded.model, created_at=now() returning report_id""",
+                (day, json.dumps(facts, default=str), json.dumps(review, default=str), model)).fetchone()["report_id"]
+
+    def insert_proposal(self, report_id: int, p: dict) -> int:
+        with self.conn() as c:
+            return c.execute(
+                """insert into brain_proposals (report_id, param, old_value, new_value, rationale)
+                   values (%s, %s, %s, %s, %s) returning proposal_id""",
+                (report_id, p["param"], json.dumps(p["old_value"]), json.dumps(p["new_value"]), p["rationale"]),
+            ).fetchone()["proposal_id"]
+
+    def get_proposal(self, proposal_id: int) -> dict | None:
+        with self.conn() as c:
+            return c.execute("select * from brain_proposals where proposal_id=%s", (proposal_id,)).fetchone()
+
+    def list_proposals(self, status: str | None = "pending") -> list[dict]:
+        q, args = "select * from brain_proposals", []
+        if status:
+            q += " where status=%s"
+            args.append(status)
+        with self.conn() as c:
+            return c.execute(q + " order by proposal_id", args).fetchall()
+
+    def decide_proposal(self, proposal_id: int, status: str, candidate_version: str | None = None) -> None:
+        with self.conn() as c:
+            c.execute("""update brain_proposals set status=%s, candidate_version=%s, decided_at=now()
+                         where proposal_id=%s""", (status, candidate_version, proposal_id))
+
+    def latest_brain_report(self) -> dict | None:
+        with self.conn() as c:
+            return c.execute("select * from brain_reports order by report_day desc limit 1").fetchone()
+
+    def version_params(self, version: str) -> dict | None:
+        with self.conn() as c:
+            r = c.execute("select params from strategy_versions where version=%s", (version,)).fetchone()
+        return r["params"] if r else None
+
     def raise_alert(self, kind: str, detail: dict) -> None:
         with self.conn() as c:
             c.execute("insert into monitor_alerts (kind, detail) values (%s, %s)",
