@@ -1,9 +1,0 @@
-name: diag
-on:
-  push:
-    paths: [".github/workflows/diag.yml"]
-jobs:
-  hello:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "actions can start"; python3 --version
