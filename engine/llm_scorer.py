@@ -68,7 +68,6 @@ class Scorer:
         msg = self.client.messages.create(
             model=self.model,
             max_tokens=60,
-            temperature=0,
             system=SYSTEM,
             messages=[{"role": "user", "content": USER_TEMPLATE.format(
                 symbol=symbol, headline=headline.strip()[:500], summary=(summary or "").strip()[:800])}],

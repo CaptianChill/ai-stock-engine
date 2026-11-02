@@ -161,7 +161,7 @@ def llm_review(facts: dict, sv: StrategyVersion, api_key: str | None, model: str
     client = anthropic.Anthropic(api_key=api_key)
     current = {k: sv.get_param(k) for k in ALLOWED_PARAMS}
     msg = client.messages.create(
-        model=model, max_tokens=1500, temperature=0, system=SYSTEM,
+        model=model, max_tokens=1500, system=SYSTEM,
         messages=[{"role": "user", "content": PROMPT.format(
             facts=json.dumps(facts, default=str)[:30000],
             allowed=json.dumps({k: [v[0], v[1]] for k, v in ALLOWED_PARAMS.items()}),
