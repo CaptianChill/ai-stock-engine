@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Mission Control">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icon.svg">
+<title>Mission Control</title>
+<style>
+  :root {
+    --bg: #f6f6f3; --panel: #ffffff; --line: #e3e2dc; --fg: #1b1b18; --muted: #6b6a63;
+    --ok: #1f7a4d; --warn: #a86400; --bad: #b3261e; --accent: #2f5bd3; --accent2: #c9d6f7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0f1115; --panel: #171a20; --line: #2a2e36; --fg: #ecebe6; --muted: #9a9890;
+      --ok: #4cc38a; --warn: #f0a63a; --bad: #ff6b60; --accent: #7aa2ff; --accent2: #2a3b66; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 48px; display: grid; gap: 16px; }
+  h1 { font-size: 26px; font-weight: 600; margin: 0; letter-spacing: -.01em; }
+  h2 { font-size: 16px; font-weight: 600; margin: 0 0 4px; }
+  .lead, .note { color: var(--muted); margin: 4px 0 0; }
+  .note { font-size: 13px; margin-bottom: 12px; }
+  .lead b { color: var(--fg); }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; min-width: 0; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+  .tiles { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); }
+  .tile { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .tile .k { color: var(--muted); font-size: 12px; }
+  .tile .v { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .tile .s { color: var(--muted); font-size: 12px; }
+  .steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 160px), 1fr)); }
+  .step { border: 1px solid var(--line); border-radius: 10px; padding: 8px 12px; }
+  .step .n { color: var(--muted); font-size: 12px; } .step .t { font-weight: 600; }
+  .st { font-size: 13px; } .done, .pass { color: var(--ok); } .active { color: var(--warn); }
+  .waiting, .notrun { color: var(--muted); } .fail, .stuck { color: var(--bad); }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; font-variant-numeric: tabular-nums; }
+  th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td.d { color: var(--muted); font-size: 12px; }
+  .scroll { overflow-x: auto; }
+  .chart svg { width: 100%; height: 200px; display: block; }
+  .chart text { fill: var(--muted); font-size: 11px; }
+  .empty { color: var(--muted); font-size: 13px; }
+  .bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--fg); border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .lock b.locked { color: var(--warn); } .lock b.unlocked { color: var(--ok); }
+  #gate { min-height: 70vh; display: grid; place-items: center; }
+  #gate form { display: grid; gap: 10px; width: min(100%, 320px); }
+  #gate input { font: inherit; font-size: 20px; letter-spacing: .2em; text-align: center; padding: 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); }
+  .err { color: var(--bad); font-size: 13px; min-height: 1.2em; }
+  .pill { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--line); }
+  .good { color: var(--ok); } .badl { color: var(--bad); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <section id="gate">
+    <form id="pinform" autocomplete="off">
+      <h1 style="text-align:center">Mission Control</h1>
+      <p class="lead" style="text-align:center">Enter your PIN</p>
+      <input id="pin" type="password" inputmode="numeric" autocomplete="current-password" aria-label="PIN" required>
+      <label class="note" style="display:flex;gap:6px;align-items:center;justify-content:center;margin:0">
+        <input type="checkbox" id="remember" checked> Remember on this device</label>
+      <button class="primary" type="submit">Open</button>
+      <div class="err" id="pinerr"></div>
+    </form>
+  </section>
+
+  <div id="app" hidden style="display:grid;gap:16px">
+    <header class="bar">
+      <div>
+        <h1>AI Stock Engine</h1>
+        <p class="lead lock">Validation run: <b id="current">—</b>. Live trading is <b id="lockword">—</b>.</p>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span class="note" id="updated" style="margin:0"></span>
+        <button id="refresh">Refresh</button>
+        <button id="logout" title="Forget PIN on this device">Lock</button>
+      </div>
+    </header>
+
+    <section class="card">
+      <h2>Validation run progress</h2>
+      <p class="note">The five stages the research run on your PC works through. Refreshes every 60 seconds.</p>
+      <ol class="steps" id="steps"></ol>
+    </section>
+
+    <section class="tiles" id="tiles"></section>
+
+    <section class="card">
+      <h2>Audit gates</h2>
+      <p class="note">Every gate must pass before real money can be used. "Not run" means the run hasn't reached it yet.</p>
+      <div class="scroll"><table><thead><tr><th>Gate</th><th>Status</th><th>What it checks</th></tr></thead><tbody id="gates"></tbody></table></div>
+    </section>
+
+    <div class="grid">
+      <section class="card"><h2>News collected per week</h2><p class="note">Company headlines the AI reads.</p><div class="chart" id="newsChart"></div></section>
+      <section class="card"><h2>S&amp;P 500 (SPY), monthly close</h2><p class="note">The market backdrop for the replay.</p><div class="chart" id="spyChart"></div></section>
+    </div>
+
+    <div class="grid">
+      <section class="card"><h2>Paper account</h2><p class="note">Equity snapshots from paper trading.</p><div class="chart" id="eqChart"></div>
+        <div class="scroll"><table><thead><tr><th>Open position</th><th>Engine</th><th>Qty</th><th>Entered</th><th>Exit due</th></tr></thead><tbody id="positions"></tbody></table></div></section>
+      <section class="card"><h2>Latest AI headline calls</h2><p class="note">Most recent good/bad labels.</p>
+        <div class="scroll"><table><thead><tr><th>Stock</th><th>Call</th><th>Headline</th></tr></thead><tbody id="news"></tbody></table></div></section>
+    </div>
+
+    <div class="grid">
+      <section class="card"><h2>Review brain</h2><p class="note">Nightly review and parameter proposals (they wait for your approval).</p><div id="brain"></div></section>
+      <section class="card"><h2>Alerts &amp; scheduler</h2><p class="note">Monitor alerts and the last stages the PC ran.</p><div id="ops"></div></section>
+    </div>
+
+    <p class="note">Not financial advice. Passing gates proves the evidence is sound, not that the strategy will make money. This page is read-only.</p>
+  </div>
+</main>
+
+<script>
+(() => {
+  const GATES = [
+    ['no_lookahead', 'Uses only news after the AI\'s training cutoff; every signal predates the trade.'],
+    ['cost_stress', 'Still profitable at double the assumed trading costs.'],
+    ['out_of_sample', 'Last 40% of the period is profitable with frozen settings.'],
+    ['overfitting', 'Deflated Sharpe ≥ 0.95 given every version tried.'],
+    ['decay_haircut', 'Still profitable with half the measured edge.'],
+    ['concentration', 'No single stock or day is more than 25% of profit.'],
+    ['min_sample', 'At least 60 days and 100 news trades.'],
+    ['momentum_history', 'Momentum alone holds up on price history since 2016.'],
+    ['independent_reproduction', 'A separate implementation re-derives every trade and agrees.'],
+    ['paper_run_completed', 'At least one full paper-trading day.'],
+    ['paper_match', 'Paper fills match the prices the replay assumed.'],
+    ['kill_switch_tested', 'Self-test proved the emergency stop works.'],
+  ];
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const fmt = (n) => n == null ? '—' : Number(n).toLocaleString();
+  const ago = (t) => { if (!t) return '—'; const m = Math.round((Date.now() - new Date(t)) / 60000);
+    return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : m < 1440 ? Math.round(m/60) + ' h ago' : Math.round(m/1440) + ' d ago'; };
+  const day = (t) => t ? String(t).slice(0, 10) : '—';
+
+  let PIN = null; try { PIN = localStorage.getItem('mc_pin'); } catch {}
+  let timer = null;
+
+  async function load() {
+    const r = await fetch('/api/data', { headers: { 'x-pin': PIN || '' } });
+    const j = await r.json().catch(() => ({}));
+    if (r.status === 401) { lock('Wrong PIN.'); return; }
+    if (!r.ok) { showApp(); $('current').textContent = j.message || 'data unavailable'; return; }
+    showApp(); render(j);
+  }
+  function showApp() { $('gate').hidden = true; $('app').hidden = false; }
+  function lock(msg) {
+    PIN = null; try { localStorage.removeItem('mc_pin'); } catch {}
+    clearInterval(timer); $('app').hidden = true; $('gate').hidden = false; $('pinerr').textContent = msg || '';
+  }
+  $('pinform').onsubmit = (e) => {
+    e.preventDefault(); PIN = $('pin').value.trim(); $('pinerr').textContent = '';
+    if ($('remember').checked) { try { localStorage.setItem('mc_pin', PIN); } catch {} }
+    start();
+  };
+  $('refresh').onclick = () => load();
+  $('logout').onclick = () => lock('');
+  function start() { load(); clearInterval(timer); timer = setInterval(load, 60000); }
+  if (PIN) start();
+
+  function render(d) {
+    const p = d.progress || {};
+    const gates = Object.fromEntries((d.gates || []).map((g) => [g.gate, g]));
+    const scored = Number(p.scored || 0), news = Number(p.news_est || 0), bars = Number(p.bars_est || 0);
+    const scoreStale = scored > 0 && p.scored_latest && (Date.now() - new Date(p.scored_latest)) > 3 * 3600e3;
+    const stepState = {
+      prices: bars > 0 ? (Number(p.symbols_last_day) >= 1000 ? ['done', fmt(bars) + ' daily bars'] : ['active', fmt(bars) + ' bars so far']) : ['waiting', 'not started'],
+      news: news > 0 ? ['done', fmt(news) + ' headlines'] : (bars > 0 ? ['active', 'downloading'] : ['waiting', 'waiting']),
+      scoring: scored > 0 ? (d.runs?.length ? ['done', fmt(scored) + ' scored'] : [scoreStale ? 'stuck' : 'active', fmt(scored) + ' scored · last ' + ago(p.scored_latest)]) : (news > 0 ? ['active', 'starting — 0 scored'] : ['waiting', 'waiting']),
+      replay: d.runs?.length ? ['done', 'run #' + d.runs[0].run_id] : ['waiting', 'waiting'],
+      audit: (d.gates || []).length ? [GATES.every(([g]) => gates[g]?.passed) ? 'done' : 'active', (d.gates.filter((g) => g.passed).length) + ' of ' + GATES.length + ' passing'] : ['waiting', 'waiting'],
+    };
+    const names = [['prices','Download prices'],['news','Download news'],['scoring','AI scores headlines'],['replay','Replay with costs'],['audit','Audit gates']];
+    $('steps').innerHTML = names.map(([k, t], i) => `<li class="step"><div class="n">Step ${i+1}</div><div class="t">${t}</div><div class="st ${stepState[k][0]}">${esc(stepState[k][1])}</div></li>`).join('');
+    const cur = names.find(([k]) => stepState[k][0] !== 'done');
+    $('current').textContent = cur ? cur[1].toLowerCase() + (stepState[cur[0]][0] === 'stuck' ? ' (stalled)' : '') : 'complete';
+    const allPass = GATES.every(([g]) => gates[g]?.passed);
+    $('lockword').textContent = allPass ? 'unlockable' : 'locked'; $('lockword').className = allPass ? 'unlocked' : 'locked';
+
+    const m = d.runs?.[0]?.metrics || {};
+    const pct = (x) => x == null ? '—' : (x * 100).toFixed(1) + '%';
+    const tiles = [
+      ['Price bars', fmt(bars), p.bars_from ? day(p.bars_from) + ' → ' + day(p.bars_to) : ''],
+      ['Headlines', fmt(news), 'latest ' + ago(p.news_latest)],
+      ['AI-scored', fmt(scored), p.scored_latest ? 'last ' + ago(p.scored_latest) : 'none yet'],
+      ['Replay return', pct(m.total_return), m.sharpe != null ? 'Sharpe ' + Number(m.sharpe).toFixed(2) : 'no replay yet'],
+      ['Gates passing', (d.gates || []).filter((g) => g.passed).length + ' / ' + GATES.length, 'live needs all'],
+      ['Kill switch', d.kill?.engaged ? 'ON' : 'off', d.kill?.reason || 'trading allowed'],
+    ];
+    $('tiles').innerHTML = tiles.map(([k, v, s]) => `<div class="tile"><div class="k">${k}</div><div class="v">${esc(v)}</div><div class="s">${esc(s)}</div></div>`).join('');
+
+    $('gates').innerHTML = GATES.map(([g, desc]) => {
+      const r = gates[g]; const cls = !r ? 'notrun' : r.passed ? 'pass' : 'fail';
+      const label = !r ? 'Not run' : (r.passed ? 'Pass' : 'Fail') + ' · ' + day(r.audited_at);
+      return `<tr><td>${g.replace(/_/g, ' ')}</td><td class="${cls}">${label}</td><td class="d">${esc(desc)}</td></tr>`;
+    }).join('');
+
+    line($('newsChart'), (d.newsWeekly || []).map((r) => [r.wk, Number(r.n)]), true);
+    line($('spyChart'), (d.spy || []).map((r) => [r.m, Number(r.close)]), false);
+    const eq = (d.equity || []).filter((r) => r.mode === 'paper').reverse();
+    line($('eqChart'), eq.map((r) => [r.snap_day, Number(r.equity)]), false, 'No paper-trading snapshots yet.');
+
+    $('positions').innerHTML = (d.positions || []).length ? d.positions.map((r) =>
+      `<tr><td>${esc(r.symbol)}</td><td>${esc(r.engine)}</td><td>${fmt(r.qty)}</td><td>${day(r.entry_day)}</td><td>${day(r.exit_due)}</td></tr>`).join('')
+      : '<tr><td colspan="5" class="empty">No open positions.</td></tr>';
+
+    $('news').innerHTML = (d.topNews || []).length ? d.topNews.map((r) =>
+      `<tr><td>${esc(r.symbol)}</td><td class="${r.label === 'good' ? 'good' : 'badl'}">${esc(r.label)} ${Math.round(r.confidence * 100)}%</td><td class="d">${esc(r.headline)}</td></tr>`).join('')
+      : '<tr><td colspan="3" class="empty">No headlines scored yet.</td></tr>';
+
+    const b = d.brain;
+    const review = b?.review ? (b.review.summary || b.review.findings || JSON.stringify(b.review)).toString().slice(0, 600) : null;
+    $('brain').innerHTML = (b ? `<p><b>${day(b.report_day)}</b> — ${esc(review)}</p>` : '<p class="empty">No nightly review yet.</p>') +
+      ((d.proposals || []).length ? '<table><thead><tr><th>#</th><th>Setting</th><th>Change</th><th>Status</th></tr></thead><tbody>' +
+        d.proposals.map((r) => `<tr><td>${r.proposal_id}</td><td>${esc(r.param)}</td><td>${esc(JSON.stringify(r.old_value))} → ${esc(JSON.stringify(r.new_value))}</td><td><span class="pill">${esc(r.status)}</span></td></tr>`).join('') + '</tbody></table>' : '');
+
+    $('ops').innerHTML = ((d.alerts || []).length ? '<table><thead><tr><th>When</th><th>Alert</th></tr></thead><tbody>' +
+        d.alerts.map((a) => `<tr><td>${ago(a.raised_at)}</td><td>${esc(a.kind)}</td></tr>`).join('') + '</tbody></table>' : '<p class="empty">No alerts.</p>') +
+      ((d.stages || []).length ? '<table style="margin-top:12px"><thead><tr><th>Stage</th><th>Day</th><th>Status</th></tr></thead><tbody>' +
+        d.stages.map((s) => `<tr><td>${esc(s.stage)}</td><td>${day(s.trade_day)}</td><td class="${s.status === 'done' ? 'pass' : s.status === 'error' ? 'fail' : ''}">${esc(s.status)}</td></tr>`).join('') + '</tbody></table>' : '<p class="empty">The scheduler hasn\'t run a trading stage yet.</p>');
+
+    $('updated').textContent = 'Updated ' + new Date(d.now).toLocaleTimeString();
+  }
+
+  function line(el, pts, bars, emptyMsg) {
+    if (pts.length < 2) { el.innerHTML = `<p class="empty">${emptyMsg || 'Not enough data yet.'}</p>`; return; }
+    const W = 600, H = 200, L = 46, R = 8, T = 10, B = 22;
+    const ys = pts.map((p) => p[1]); let lo = bars ? 0 : Math.min(...ys), hi = Math.max(...ys);
+    if (hi === lo) hi = lo + 1; const pad = (hi - lo) * 0.06; if (!bars) lo -= pad; hi += pad;
+    const x = (i) => L + (i / (pts.length - 1)) * (W - L - R), y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+    const short = (v) => Math.abs(v) >= 1e6 ? (v/1e6).toFixed(1) + 'M' : Math.abs(v) >= 1e3 ? (v/1e3).toFixed(1) + 'k' : v.toFixed(0);
+    let g = '';
+    for (let k = 0; k <= 3; k++) { const v = lo + (hi - lo) * k / 3, yy = y(v);
+      g += `<line x1="${L}" x2="${W-R}" y1="${yy}" y2="${yy}" stroke="var(--line)"/><text x="${L-6}" y="${yy+4}" text-anchor="end">${short(v)}</text>`; }
+    const lab = [0, Math.floor(pts.length / 2), pts.length - 1];
+    lab.forEach((i) => g += `<text x="${x(i)}" y="${H-6}" text-anchor="${i === 0 ? 'start' : i === pts.length - 1 ? 'end' : 'middle'}">${String(pts[i][0]).slice(0, 7)}</text>`);
+    let body;
+    if (bars) { const w = Math.max(2, (W - L - R) / pts.length - 3);
+      body = pts.map((p, i) => `<rect x="${x(i) - w/2}" y="${y(p[1])}" width="${w}" height="${y(lo) - y(p[1])}" rx="2" fill="var(--accent)"><title>${day(p[0])}: ${fmt(p[1])}</title></rect>`).join('');
+    } else {
+      const dpath = pts.map((p, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p[1]).toFixed(1)).join(' ');
+      body = `<path d="${dpath}" fill="none" stroke="var(--accent)" stroke-width="2"/>` +
+        pts.map((p, i) => `<circle cx="${x(i)}" cy="${y(p[1])}" r="6" fill="transparent"><title>${day(p[0])}: ${fmt(Math.round(p[1]*100)/100)}</title></circle>`).join('');
+    }
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img">${g}${body}</svg>`;
+  }
+})();
+</script>
+</body>
+</html>

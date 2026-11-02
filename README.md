@@ -130,3 +130,13 @@ python -m engine kill "reason" | release
 python -m engine brain | report | proposals [--all] | approve ID | reject ID
 python -m pytest -q
 ```
+
+## Mission Control website (dashboard/)
+
+A PIN-protected, read-only status page you can open on any phone or computer, hosted free on Vercel.
+It reads the database through the `dash_ro` login, which can only read (writes are refused).
+Vercel project settings → Environment Variables:
+- `DATABASE_URL`: the `dash_ro` connection string (pooler host)
+- `DASHBOARD_PIN`: any PIN of 6+ characters
+
+Then redeploy. On a phone, use "Add to Home Screen" to get an app icon.
