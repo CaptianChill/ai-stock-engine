@@ -53,6 +53,18 @@ class DB:
             ).fetchall()
         return pd.DataFrame(rows, columns=["symbol", "day", "open", "high", "low", "close", "volume"])
 
+    def bars_coverage(self) -> dict[str, tuple[date, date]]:
+        """symbol -> (first day, last day) already stored. Lets downloads resume."""
+        with self.conn() as c:
+            rows = c.execute("select symbol, min(day) as lo, max(day) as hi from bars group by symbol").fetchall()
+        return {r["symbol"]: (r["lo"], r["hi"]) for r in rows}
+
+    def last_news_time(self, start: datetime, end: datetime) -> datetime | None:
+        with self.conn() as c:
+            r = c.execute("select max(published_at) as t from news where published_at > %s and published_at <= %s",
+                          (start, end)).fetchone()
+        return r["t"] if r else None
+
     def upsert_news(self, rows: Iterable[dict]) -> int:
         rows = list(rows)
         if not rows:

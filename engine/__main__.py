@@ -65,18 +65,30 @@ def cmd_init_db(a, s):
 
 
 def cmd_fetch_history(a, s):
-    from .alpaca import DataClient, TradingClient
-    from .runner import EXCHANGES
+    """Fill in recent prices for the stocks already stored, then download news. Resumable:
+    re-running skips what is already in the database."""
+    from .alpaca import DataClient
     db = _db(s)
-    tc = TradingClient(s.alpaca_key, s.alpaca_secret, live=False)
     dc = DataClient(s.alpaca_key, s.alpaca_secret)
-    syms = sorted(x["symbol"] for x in tc.assets()
-                  if x.get("tradable") and x.get("exchange") in EXCHANGES and "." not in x["symbol"])
-    print(f"{len(syms)} symbols; fetching bars from {_history_start(a.start)} to {a.end}")
-    n = db.upsert_bars(dc.daily_bars(syms, _history_start(a.start), a.end))
-    print(f"bars stored: {n}")
+    cov = db.bars_coverage()
+    if not cov:
+        sys.exit("no price history yet: run fetch-bars first")
+    want_from = _history_start(a.start)
+    # Group symbols by where their stored history ends, and fetch only the missing tail.
+    gaps: dict[date, list[str]] = {}
+    for sym, (lo, hi) in cov.items():
+        if hi < a.end - timedelta(days=4):
+            gaps.setdefault(max(hi + timedelta(days=1), want_from), []).append(sym)
+    n = 0
+    for frm, syms in sorted(gaps.items()):
+        n += db.upsert_bars(dc.daily_bars(sorted(syms), frm, a.end))
+    print(f"price gaps filled: {n} bars for {sum(len(v) for v in gaps.values())} of {len(cov)} stocks")
     since = datetime.combine(a.start - timedelta(days=14), time(0), NY)
     until = datetime.combine(a.end, time(23, 59), NY)
+    last = db.last_news_time(since, until)
+    if last is not None and last > since:
+        print(f"resuming news download after {last}")
+        since = last
     n = 0
     batch = []
     for item in dc.news(since, until):
@@ -84,9 +96,9 @@ def cmd_fetch_history(a, s):
         if len(batch) >= 1000:
             n += db.upsert_news(batch)
             batch = []
-            print(f"news stored: {n}", end="\r")
+            print(f"news stored: {n}", flush=True)
     n += db.upsert_news(batch)
-    print(f"\nnews stored: {n}")
+    print(f"news stored: {n}")
 
 
 def cmd_fetch_bars(a, s):
@@ -100,17 +112,33 @@ def cmd_fetch_bars(a, s):
                   if x.get("tradable") and x.get("exchange") in EXCHANGES and "." not in x["symbol"])
     # Rank by recent dollar volume and keep the most-traded names: the engines only ever trade
     # the top 500, and the full market since 2016 would not fit a free 1 GB database.
-    recent = pd.DataFrame(list(dc.daily_bars(syms, a.end - timedelta(days=45), a.end)))
-    if recent.empty:
-        sys.exit("no recent bars returned; check the Alpaca keys and data feed")
-    dv = (recent["close"] * recent["volume"]).groupby(recent["symbol"]).mean()
-    keep = sorted(dv.sort_values(ascending=False).index[: a.top])
-    print(f"keeping the {len(keep)} most-traded of {len(syms)} symbols")
+    # The ranking is saved, so a restart resumes instead of starting over.
+    from pathlib import Path
+    rank_file = Path("logs") / f"top{a.top}_{a.end}.txt"
+    if rank_file.exists():
+        keep = rank_file.read_text().split()
+        print(f"resuming with the saved list of {len(keep)} most-traded stocks")
+    else:
+        recent = pd.DataFrame(list(dc.daily_bars(syms, a.end - timedelta(days=45), a.end)))
+        if recent.empty:
+            sys.exit("no recent bars returned; check the Alpaca keys and data feed")
+        dv = (recent["close"] * recent["volume"]).groupby(recent["symbol"]).mean()
+        keep = sorted(dv.sort_values(ascending=False).index[: a.top])
+        rank_file.parent.mkdir(exist_ok=True)
+        rank_file.write_text("\n".join(keep))
+        print(f"keeping the {len(keep)} most-traded of {len(syms)} symbols")
+    cov = db.bars_coverage()
+    # A stock is done when its stored history reaches the end date (stocks listed after the
+    # start date simply begin later; Alpaca pages each stock in date order, so a cut-off
+    # download shows up as an early last day).
+    done = {sym for sym, (lo, hi) in cov.items() if hi >= a.end - timedelta(days=4)}
+    todo = [sym for sym in keep if sym not in done]
+    if len(todo) < len(keep):
+        print(f"{len(keep) - len(todo)} stocks already downloaded; fetching the other {len(todo)}")
     total = 0
-    for i in range(0, len(keep), 100):
-        total += db.upsert_bars(dc.daily_bars(keep[i:i + 100], a.start, a.end))
-        print(f"bars stored: {total} ({min(i + 100, len(keep))}/{len(keep)} symbols)", end="\r")
-    print()
+    for i in range(0, len(todo), 100):
+        total += db.upsert_bars(dc.daily_bars(todo[i:i + 100], a.start, a.end))
+        print(f"bars stored: {total} ({min(i + 100, len(todo))}/{len(todo)} stocks)", flush=True)
 
 
 def _universe_union(bars, sv, from_day: date) -> set[str]:

@@ -29,6 +29,10 @@ class FakeDB:
         return b[(b["day"] >= start) & (b["day"] <= end)].reset_index(drop=True)
 
     def upsert_bars(self, rows): return len(list(rows))
+
+    def bars_coverage(self):
+        g = self.bars.groupby("symbol")["day"]
+        return {sym: (lo, hi) for sym, lo, hi in zip(g.min().index, g.min().values, g.max().values)}
     def upsert_news(self, rows): return len(list(rows))
     def unscored_news(self, *a, **k): return []
     def insert_scores(self, rows): return 0

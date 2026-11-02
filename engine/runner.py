@@ -75,7 +75,10 @@ class Runner:
         start = today - timedelta(days=int(self.sv.momentum.lookback_days * 1.6) + 30)
         have = self.db.load_bars(today - timedelta(days=10), today - timedelta(days=1))
         fetch_from = today - timedelta(days=10) if len(have) else start
-        syms = self._universe_symbols()
+        # Keep to the stocks already tracked (the most-traded set from fetch-bars) so the
+        # free database doesn't fill up; fall back to the whole market on a fresh database.
+        tracked = sorted(self.db.bars_coverage())
+        syms = tracked or self._universe_symbols()
         self.db.upsert_bars(self.dc.daily_bars(syms, fetch_from, today - timedelta(days=1)))
         return self.db.load_bars(start, today - timedelta(days=1))
 
