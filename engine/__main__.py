@@ -2,14 +2,14 @@
 
   init-db                         apply schema.sql
   fetch-history START END         daily bars (from ~13 months before START) + news for START..END
-  score-news START END [--max-calls N]   LLM-score news for symbols in the tradeable universe
+  score-news START END [--max-calls N] [--batch]   LLM-score news (--batch: half price, via the Batches API)
   replay START END                run the replay with costs, store it, print metrics
   fetch-bars START END            price history only (for the long momentum check, e.g. from 2016)
   audit RUN_ID [--momentum-history-start 2016-01-01]   run every replay gate and record results
   paper-gates                     run the paper-trading gates and record results
   test-kill-switch                prove the kill switch and loss stop block entries
   tick [--stage S]                scheduler entry point (paper unless unlocked for live)
-  research START END [--max-calls N] [--skip-fetch]   the whole validation run in one go
+  research START END [--max-calls N] [--skip-fetch] [--batch]   the whole validation run in one go
   status                          gates, kill switch, open positions, latest equity
   kill "reason" / release         engage or release the kill switch
   brain                           nightly review: watchdog, scorer check, written review, proposals
@@ -165,6 +165,11 @@ def cmd_score_news(a, s):
     if a.max_calls is not None:
         rows = rows[: a.max_calls]
     scorer = Scorer(s.anthropic_key, s.llm_model, s.llm_prompt_version)
+    if getattr(a, "batch", False):
+        from .llm_scorer import BatchScorer
+        stored = BatchScorer(scorer, "logs/batches").run(rows, db.insert_scores)
+        print(f"batch scoring finished: {stored} scores stored")
+        return
     for i in range(0, len(rows), 100):
         db.insert_scores(scorer.score_rows(rows[i:i + 100]))
         print(f"scored {min(i + 100, len(rows))}/{len(rows)}", end="\r")
@@ -205,7 +210,7 @@ def cmd_research(a, s):
         cmd_fetch_bars(N(start=a.momentum_history_start, end=a.end, top=1500), s)
         print(f"== fetch-history {a.start} {a.end}")
         cmd_fetch_history(N(start=a.start, end=a.end), s)
-    print("== score-news"); cmd_score_news(N(start=a.start, end=a.end, max_calls=a.max_calls), s)
+    print("== score-news"); cmd_score_news(N(start=a.start, end=a.end, max_calls=a.max_calls, batch=a.batch), s)
     print("== replay"); run_id = cmd_replay(N(start=a.start, end=a.end, version=None), s)
     print(f"== audit {run_id}"); cmd_audit(N(run_id=run_id, momentum_history_start=a.momentum_history_start), s)
     print("== test-kill-switch"); cmd_test_kill_switch(N(), s)
@@ -355,6 +360,7 @@ def main(argv=None):
         p.add_argument("end", type=date.fromisoformat)
         if name == "score-news":
             p.add_argument("--max-calls", type=int)
+            p.add_argument("--batch", action="store_true", help="half-price scoring via the Batches API")
         if name == "replay":
             p.add_argument("--version", help="replay a registered candidate version instead of the active one")
         p.set_defaults(fn=fn)
@@ -376,6 +382,7 @@ def main(argv=None):
     p.add_argument("--max-calls", type=int, default=None)
     p.add_argument("--momentum-history-start", type=date.fromisoformat, default=date(2016, 1, 1))
     p.add_argument("--skip-fetch", action="store_true")
+    p.add_argument("--batch", action="store_true", help="half-price scoring via the Batches API")
     p.set_defaults(fn=cmd_research)
     sub.add_parser("brain").set_defaults(fn=cmd_brain)
     sub.add_parser("report").set_defaults(fn=cmd_report)
