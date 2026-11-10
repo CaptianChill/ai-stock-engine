@@ -45,13 +45,44 @@ class DB:
             )
         return len(rows)
 
-    def load_bars(self, start: date, end: date) -> pd.DataFrame:
-        with self.conn() as c:
-            rows = c.execute(
-                "select symbol, day, open, high, low, close, volume from bars "
-                "where day between %s and %s order by day, symbol", (start, end)
-            ).fetchall()
-        return pd.DataFrame(rows, columns=["symbol", "day", "open", "high", "low", "close", "volume"])
+    def load_bars(self, start: date, end: date, chunk_days: int = 120, retries: int = 3) -> pd.DataFrame:
+        """Loads in date chunks on fresh connections, retrying dropped ones. A single 10-year
+        query was being cut off by the hosted database (the audit crashed on it)."""
+        import time as _time
+        from datetime import timedelta
+        cols = ["symbol", "day", "open", "high", "low", "close", "volume"]
+        frames, lo = [], start
+        while lo <= end:
+            hi = min(end, lo + timedelta(days=chunk_days - 1))
+            for attempt in range(retries):
+                try:
+                    with self.conn() as c:
+                        rows = c.execute(
+                            "select symbol, day, open, high, low, close, volume from bars "
+                            "where day between %s and %s order by day, symbol", (lo, hi)
+                        ).fetchall()
+                    break
+                except psycopg.OperationalError:
+                    if attempt == retries - 1:
+                        raise
+                    _time.sleep(2 * (attempt + 1))
+            if rows:
+                frames.append(pd.DataFrame(rows, columns=cols))
+            lo = hi + timedelta(days=1)
+        return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=cols)
+
+    @contextmanager
+    def stage_lock(self, day: date, stage: str) -> Iterator[bool]:
+        """Postgres advisory lock so two schedulers (the PC and GitHub Actions) can never run
+        the same stage at the same moment. Yields False if another run holds it."""
+        key = f"ase|{day.isoformat()}|{stage}"
+        with psycopg.connect(self.url, autocommit=True) as c:
+            got = c.execute("select pg_try_advisory_lock(hashtext(%s))", (key,)).fetchone()[0]
+            try:
+                yield bool(got)
+            finally:
+                if got:
+                    c.execute("select pg_advisory_unlock(hashtext(%s))", (key,))
 
     def bars_coverage(self) -> dict[str, tuple[date, date]]:
         """symbol -> (first day, last day) already stored. Lets downloads resume."""

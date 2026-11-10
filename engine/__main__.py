@@ -13,7 +13,7 @@
   status                          gates, kill switch, open positions, latest equity
   kill "reason" / release         engage or release the kill switch
   brain                           nightly review: watchdog, scorer check, written review, proposals
-  report                          print the latest brain report
+  report [--notify]               print the latest brain report (--notify: also send to phone)
   proposals [--all] / approve ID / reject ID   the brain's proposal queue (approve = test only)
 """
 from __future__ import annotations
@@ -288,6 +288,9 @@ def cmd_brain(a, s):
 
 def cmd_report(a, s):
     r = _db(s).latest_brain_report()
+    if r and getattr(a, "notify", False):
+        from .notify import brain_message, notify
+        notify(*brain_message(r["review"]))
     if not r:
         print("no brain report yet")
         return
@@ -385,7 +388,8 @@ def main(argv=None):
     p.add_argument("--batch", action="store_true", help="half-price scoring via the Batches API")
     p.set_defaults(fn=cmd_research)
     sub.add_parser("brain").set_defaults(fn=cmd_brain)
-    sub.add_parser("report").set_defaults(fn=cmd_report)
+    p = sub.add_parser("report"); p.add_argument("--notify", action="store_true", help="also send it to the phone")
+    p.set_defaults(fn=cmd_report)
     p = sub.add_parser("proposals"); p.add_argument("--all", action="store_true"); p.set_defaults(fn=cmd_proposals)
     p = sub.add_parser("approve"); p.add_argument("proposal_id", type=int); p.set_defaults(fn=cmd_approve)
     p = sub.add_parser("reject"); p.add_argument("proposal_id", type=int); p.set_defaults(fn=cmd_reject)

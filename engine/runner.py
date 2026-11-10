@@ -55,15 +55,27 @@ class Runner:
             "close" if t >= time(16, 30) else None)
         if not due:
             return {"skipped": f"no stage due at {t:%H:%M} ET"}
+        lock = getattr(self.db, "stage_lock", None)
+        if lock is None:
+            return self._run_stage(today, due, cal, force_stage)
+        with lock(today, due) as got:
+            if not got:
+                return {"skipped": f"{due} running elsewhere"}
+            return self._run_stage(today, due, cal, force_stage)
+
+    def _run_stage(self, today: date, due: str, cal, force_stage: str | None) -> dict:
+        from .notify import notify, stage_message
         if self.db.stage_done(today, due) and not force_stage:
             return {"skipped": f"{due} already done"}
         fn = {"premarket": self.premarket, "exits": self.exits, "close": self.close}[due]
         try:
             detail = fn(today, cal)
             self.db.mark_stage(today, due, "done", detail)
+            notify(*stage_message(due, detail, self.mode))
             return {"stage": due, **(detail or {})}
         except Exception as e:  # record and re-raise so the scheduler shows a failure
             self.db.mark_stage(today, due, "failed", {"error": repr(e)})
+            notify(f"🔴 {due} FAILED", f"{type(e).__name__}: {str(e)[:300]}", "urgent")
             raise
 
     # -- helpers ------------------------------------------------------------

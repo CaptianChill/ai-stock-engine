@@ -2,8 +2,12 @@ name: trading-tick
 # Every 10 minutes on weekdays during US market-adjacent hours (UTC). The engine reads the
 # New York clock itself and runs whichever stage is due, once per day, so DST shifts and
 # late or duplicate scheduler runs are harmless.
-# Scheduling now runs on the Windows PC (see windows/). Manual runs still work here.
+# Runs in the cloud so trading doesn't depend on the PC being awake. The Windows PC task can
+# keep running as a backup: a database lock and the once-per-day stage check stop double runs.
+# Skips cleanly until the repo secrets are added.
 on:
+  schedule:
+    - cron: "*/10 12-22 * * 1-5"
   workflow_dispatch:
     inputs:
       stage:
@@ -27,6 +31,7 @@ jobs:
       LLM_MODEL: ${{ vars.LLM_MODEL || 'claude-haiku-5-5' }}
       LLM_KNOWLEDGE_CUTOFF: ${{ vars.LLM_KNOWLEDGE_CUTOFF || '2026-07-01' }}
       ALPACA_DATA_FEED: ${{ vars.ALPACA_DATA_FEED || 'iex' }}
+      NOTIFY_URL: ${{ secrets.NOTIFY_URL }}
       # Paper only. Live trading additionally needs LIVE_CONFIRM and every audit gate passing;
       # it is deliberately NOT wired into this workflow.
       TRADING_MODE: paper

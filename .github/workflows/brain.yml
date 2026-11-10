@@ -2,8 +2,10 @@ name: review-brain
 # Nightly at 22:45 UTC on weekdays (after the 16:30 New York close stage in both EST and EDT):
 # data watchdog, LLM-scorer accuracy check, written review, up to 3 proposals.
 # Run it by hand to approve or reject a proposal (approval only makes a TEST candidate).
-# Scheduling now runs on the Windows PC (see windows/). Manual runs still work here.
+# Runs in the cloud; skips cleanly until the repo secrets are added.
 on:
+  schedule:
+    - cron: "45 22 * * 1-5"
   workflow_dispatch:
     inputs:
       action:
@@ -28,6 +30,7 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       LLM_MODEL: ${{ vars.LLM_MODEL || 'claude-haiku-5-5' }}
       BRAIN_MODEL: ${{ vars.BRAIN_MODEL || 'claude-sonnet-5-5' }}
+      NOTIFY_URL: ${{ secrets.NOTIFY_URL }}
       TRADING_MODE: paper
     steps:
       - name: Check secrets are set
@@ -55,5 +58,5 @@ jobs:
           case "$ACTION" in
             approve) python -m engine approve "${{ github.event.inputs.proposal_id }}" ;;
             reject)  python -m engine reject "${{ github.event.inputs.proposal_id }}" ;;
-            *)       python -m engine brain && python -m engine report && python -m engine proposals ;;
+            *)       python -m engine brain && python -m engine report --notify && python -m engine proposals ;;
           esac
