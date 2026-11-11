@@ -273,3 +273,67 @@ def test_momentum_rebalance_buys_then_rotates():
     assert sells == t1 - t2 and new_buys == t2 - t1
     br.fill_all(); r.tick(at(m2, 16, 45))
     assert {p["symbol"] for p in db.open_positions("paper", "momentum")} == t2
+
+
+# -- v1.1.0: momentum-only version, missed mornings, no LLM in the trading path ---------------
+def _momentum_runner(llm_veto: bool):
+    from dataclasses import replace
+    bars, scores, days = make_market(n_days=260, trend_symbols=5, edge=0.0, seed=5)
+    sv = make_version(news_weight=0.0, momentum_weight=1.0)
+    sv = replace(sv, momentum=replace(sv.momentum, llm_veto=llm_veto))
+    r, db, br = make_runner(bars, scores, days, 0)
+    r.sv = sv
+    firsts = [d for i, d in enumerate(days) if i > 0 and d.month != days[i - 1].month and i > 130]
+    return r, db, br, days, firsts
+
+
+def test_missed_rebalance_morning_is_caught_up_once():
+    r, db, br, days, firsts = _momentum_runner(llm_veto=False)
+    m1 = firsts[0]
+    late = days[days.index(m1) + 3]          # the first-of-month morning never ran
+    br.today = late
+    out = r.tick(at(late, 9, 0))
+    assert out["momentum"]["catch_up"] is True and out["orders_submitted"] == r.sv.momentum.top_n
+    br.fill_all(); r.tick(at(late, 16, 45))
+    assert len(db.open_positions("paper", "momentum")) == r.sv.momentum.top_n
+    nxt = days[days.index(late) + 1]         # the next morning must not rebalance again
+    br.today = nxt
+    out2 = r.tick(at(nxt, 9, 0))
+    assert out2["momentum"] is None and out2["orders_submitted"] == 0
+
+
+def test_rebalance_blocked_by_kill_switch_is_retried_after_release():
+    r, db, br, days, firsts = _momentum_runner(llm_veto=False)
+    m1 = firsts[0]
+    db.set_kill_switch(True, "test")
+    br.today = m1
+    assert r.tick(at(m1, 9, 0))["orders_submitted"] == 0
+    db.set_kill_switch(False, "released")
+    nxt = days[days.index(m1) + 1]
+    br.today = nxt
+    assert r.tick(at(nxt, 9, 0))["orders_submitted"] == r.sv.momentum.top_n
+
+
+def test_version_without_llm_never_touches_news_or_scorer_and_opens_early():
+    r, db, br, days, firsts = _momentum_runner(llm_veto=False)
+
+    def boom(*a, **k):
+        raise AssertionError("news/LLM path must not run for a version that does not use the LLM")
+    r._signals_today = boom
+    m1 = firsts[0]
+    br.today = m1
+    out = r.tick(at(m1, 7, 10))               # scheduler's first wake-up of the day
+    assert out["orders_submitted"] == r.sv.momentum.top_n and out["news_picks"] == []
+
+
+def test_version_with_llm_still_waits_for_overnight_news():
+    r, db, br, days, firsts = _momentum_runner(llm_veto=True)
+    br.today = firsts[0]
+    assert "no stage due" in r.tick(at(firsts[0], 7, 10))["skipped"]
+
+
+def test_active_version_is_momentum_only_and_llm_free():
+    from engine.config import ACTIVE_VERSION, StrategyVersion, uses_llm
+    assert ACTIVE_VERSION.version == "v1.1.0" and not uses_llm(ACTIVE_VERSION)
+    assert ACTIVE_VERSION.news_weight == 0 and ACTIVE_VERSION.momentum_weight == 1
+    assert StrategyVersion.from_json(ACTIVE_VERSION.to_json()) == ACTIVE_VERSION

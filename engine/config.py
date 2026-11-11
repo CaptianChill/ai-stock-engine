@@ -85,7 +85,19 @@ class StrategyVersion:
 
 
 # The active version. Bump the string whenever any parameter above changes.
-ACTIVE_VERSION = StrategyVersion(version="v1.0.0")
+# v1.0.0 (60% LLM news reaction + 40% momentum with LLM veto) failed its replay audit on
+# 2026-11-10: the news engine averaged -0.17% per trade before costs over 880 trades (no edge),
+# while base momentum passed its long-history gate. v1.1.0 trades only the part that passed:
+# plain 12-1 momentum, no LLM in the trading path (so no API key or credits are needed to trade).
+# The news scorer and its data stay in the repo for research.
+V1_0_0 = StrategyVersion(version="v1.0.0")
+ACTIVE_VERSION = StrategyVersion(version="v1.1.0", news_weight=0.0, momentum_weight=1.0,
+                                 momentum=MomentumParams(llm_veto=False))
+
+
+def uses_llm(sv: StrategyVersion) -> bool:
+    """True when the LLM scorer can affect what this version trades."""
+    return sv.news_weight > 0 or (sv.momentum_weight > 0 and sv.momentum.llm_veto)
 
 
 @dataclass(frozen=True)

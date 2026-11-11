@@ -210,8 +210,16 @@ def cmd_research(a, s):
         cmd_fetch_bars(N(start=a.momentum_history_start, end=a.end, top=1500), s)
         print(f"== fetch-history {a.start} {a.end}")
         cmd_fetch_history(N(start=a.start, end=a.end), s)
-    print("== score-news"); cmd_score_news(N(start=a.start, end=a.end, max_calls=a.max_calls, batch=a.batch), s)
-    print("== replay"); run_id = cmd_replay(N(start=a.start, end=a.end, version=None), s)
+    from .config import uses_llm
+    start = a.start
+    if uses_llm(ACTIVE_VERSION):
+        print("== score-news"); cmd_score_news(N(start=a.start, end=a.end, max_calls=a.max_calls, batch=a.batch), s)
+    else:
+        # No LLM in the trading path, so there is no training-cutoff problem: judge the version
+        # on the whole price history instead of the few months since the cutoff.
+        start = a.momentum_history_start + timedelta(days=int(ACTIVE_VERSION.momentum.lookback_days * 1.6) + 30)
+        print(f"== score-news skipped (version {ACTIVE_VERSION.version} does not use the LLM); replay from {start}")
+    print("== replay"); run_id = cmd_replay(N(start=start, end=a.end, version=None), s)
     print(f"== audit {run_id}"); cmd_audit(N(run_id=run_id, momentum_history_start=a.momentum_history_start), s)
     print("== test-kill-switch"); cmd_test_kill_switch(N(), s)
     print("== status"); cmd_status(N(), s)
