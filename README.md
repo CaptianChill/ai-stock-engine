@@ -3,6 +3,18 @@
 An LLM reads company news; rules decide what trades. Two engines, one risk agent with the final
 say, and audit gates that keep it on paper until the evidence is in.
 
+**Active version: v1.1.0 (since 2026-11-11): momentum only, no LLM in the trading path.**
+v1.0.0 below failed its replay audit: over 880 news trades (Jul-Nov 2026) the news engine averaged
+-0.17% per trade before costs, which is no edge. Base momentum passed its long-history gate, so
+v1.1.0 trades only that: 100% monthly 12-1 momentum, top 15, LLM veto off. Trading no longer needs
+the Anthropic key or credits (the nightly review brain still does). The premarket stage now opens at
+07:00 ET for this version and catches up a missed monthly rebalance on the next morning it runs.
+Because there is no LLM, `research` replays it over the whole price history instead of a few months.
+Expect large swings: the long-history replay shows roughly a 58% worst drawdown, far beyond the 15%
+kill switch, which will stop new entries when it trips.
+
+The v1.0.0 design, kept for research (`V1_0_0` in `engine/config.py`):
+
 - **Fast engine (60%)**: the LLM labels each overnight headline good / bad / irrelevant with a
   confidence. Strongest positive names (liquid stocks only) are bought market-on-open and sold
   market-on-close after 2 days.

@@ -5,7 +5,8 @@ clock and runs whichever stage is due, at most once per day (state is in run_sta
 missed or repeated ticks are harmless and daylight-saving changes don't matter.
 
 Stages (New York time):
-  premarket 08:45-09:25  ingest news + bars, LLM-score, pick, risk-check, submit market-on-open orders
+  premarket 07:00-09:25  ingest news + bars, LLM-score, pick, risk-check, submit market-on-open orders
+                         (a wide window: one missed scheduler run must not cost the whole day)
   exits     14:30-15:45  submit market-on-close sells for news positions due to exit today
   close     16:30+       sync fills, snapshot equity, loss limits, monitor drift
 """
@@ -20,7 +21,7 @@ import pandas as pd
 from . import risk as rk
 from . import strategies as st
 from .alpaca import DataClient
-from .config import ACTIVE_VERSION, Settings, StrategyVersion
+from .config import ACTIVE_VERSION, Settings, StrategyVersion, uses_llm
 from .execution import client_order_id, trading_client
 from .llm_scorer import Scorer
 from .monitor import run_monitor
@@ -28,6 +29,9 @@ from .monitor import run_monitor
 log = logging.getLogger("engine.runner")
 NY = ZoneInfo("America/New_York")
 EXCHANGES = {"NYSE", "NASDAQ", "ARCA", "AMEX", "BATS"}
+# A version that uses the LLM waits until 08:45 so it sees the overnight news; one that does
+# not can place its market-on-open orders as soon as the scheduler first wakes up.
+PREMARKET_OPEN_LLM, PREMARKET_OPEN_NO_LLM = time(8, 45), time(7, 0)
 
 
 def _trading_days(tc, start: date, end: date) -> list[date]:
@@ -50,7 +54,7 @@ class Runner:
             return {"skipped": "not a trading day"}
         t = now.time()
         due = force_stage or (
-            "premarket" if time(8, 45) <= t < time(9, 25) else
+            "premarket" if (PREMARKET_OPEN_LLM if uses_llm(self.sv) else PREMARKET_OPEN_NO_LLM) <= t < time(9, 25) else
             "exits" if time(14, 30) <= t < time(15, 45) else
             "close" if t >= time(16, 30) else None)
         if not due:
@@ -143,9 +147,15 @@ class Runner:
         sv = self.sv
         uni_news = st.eligible_next(bars, sv.news.universe_size, sv.news.min_dollar_volume, sv.risk.min_price)
         uni_mom = st.eligible_next(bars, sv.momentum.universe_size, sv.momentum.min_dollar_volume, sv.risk.min_price)
-        signals = self._signals_today(today, cal, uni_news | uni_mom)
-        picks = st.news_picks(signals, {today: uni_news}, sv.news)
-        picks = picks[picks["trade_day"] == today]
+        if uses_llm(sv):
+            signals = self._signals_today(today, cal, uni_news | uni_mom)
+        else:  # no LLM in this version's trading path: no news download, no API call
+            signals = pd.DataFrame(columns=["trade_day", "symbol", "signal", "n_items", "last_published"])
+        if sv.news_weight > 0:
+            picks = st.news_picks(signals, {today: uni_news}, sv.news)
+            picks = picks[picks["trade_day"] == today]
+        else:
+            picks = signals.iloc[0:0]
 
         equity, gross = self._account()
         held = self._held()
@@ -156,9 +166,12 @@ class Runner:
         exit_due = future[sv.news.hold_days - 1] if len(future) >= sv.news.hold_days else None
         submitted = 0
 
-        # Momentum rebalance on the first trading day of the month.
+        # Momentum rebalance on the first trading day of the month, or on the first premarket
+        # that runs after it if that morning was missed (PC asleep, scheduler down): without
+        # the catch-up one missed morning would leave the engine in cash for the whole month.
         mom_detail = None
-        is_rebalance = today == min(d for d in cal if d.year == today.year and d.month == today.month)
+        month_first = min(d for d in cal if d.year == today.year and d.month == today.month)
+        is_rebalance = today == month_first or not self.db.stage_done(month_first, "momentum_rebalanced")
         if sv.momentum_weight > 0 and is_rebalance:
             close = st.pivot(bars, "close")
             past_days = [d for d in cal if d <= today]
@@ -187,7 +200,11 @@ class Runner:
                     gross += v.qty * it.ref_price
                     held[sym] = held.get(sym, 0) + v.qty
                     submitted += 1
-            mom_detail = {"targets": targets}
+            mom_detail = {"targets": targets, "catch_up": today != month_first}
+            # Only count the month as done if buying was allowed; otherwise try again tomorrow.
+            if targets and not ks and not halted:
+                self.db.mark_stage(month_first, "momentum_rebalanced", "done",
+                                   {"ran_on": str(today), "targets": targets})
 
         for _, r in picks.iterrows():
             sym = r["symbol"]

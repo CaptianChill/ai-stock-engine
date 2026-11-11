@@ -10,7 +10,7 @@ from datetime import date
 import numpy as np
 import pandas as pd
 
-from ..config import StrategyVersion
+from ..config import StrategyVersion, uses_llm as _uses_llm
 from ..replay import ReplayResult, metrics, run_replay
 from . import stats
 from .independent import reproduce
@@ -39,8 +39,6 @@ class GateResult:
     detail: dict = field(default_factory=dict)
 
 
-def _uses_llm(sv: StrategyVersion) -> bool:
-    return sv.news_weight > 0 or (sv.momentum_weight > 0 and sv.momentum.llm_veto)
 
 
 def gate_no_lookahead(res: ReplayResult, scores: pd.DataFrame, sv: StrategyVersion,
