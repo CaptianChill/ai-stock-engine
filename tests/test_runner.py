@@ -334,6 +334,37 @@ def test_version_with_llm_still_waits_for_overnight_news():
 
 def test_active_version_is_momentum_only_and_llm_free():
     from engine.config import ACTIVE_VERSION, StrategyVersion, uses_llm
-    assert ACTIVE_VERSION.version == "v1.1.0" and not uses_llm(ACTIVE_VERSION)
+    assert ACTIVE_VERSION.version == "v1.2.0" and not uses_llm(ACTIVE_VERSION)
+    assert ACTIVE_VERSION.momentum.max_corr_neighbors == 2
     assert ACTIVE_VERSION.news_weight == 0 and ACTIVE_VERSION.momentum_weight == 1
     assert StrategyVersion.from_json(ACTIVE_VERSION.to_json()) == ACTIVE_VERSION
+
+
+# -- v1.2.0: switching versions mid-month re-picks right away ----------------------------------
+def test_new_version_rebalances_mid_month_once():
+    from dataclasses import replace
+    r, db, br, days, firsts = _momentum_runner(llm_veto=False)
+    m1 = firsts[0]
+    br.today = m1
+    r.tick(at(m1, 9, 0)); br.fill_all(); r.tick(at(m1, 16, 45))
+    # old-style record (no version stamp), positions bought by the old version
+    db.state[(m1, "momentum_rebalanced")]["detail"].pop("version")
+    r.sv = replace(r.sv, version="test-new", momentum=replace(r.sv.momentum, max_corr_neighbors=1))
+    d2 = days[days.index(m1) + 2]
+    br.today = d2
+    out = r.tick(at(d2, 9, 0))
+    assert out["momentum"] and out["momentum"]["version_change"] is True
+    br.fill_all(); r.tick(at(d2, 16, 45))
+    d3 = days[days.index(d2) + 1]
+    br.today = d3
+    assert r.tick(at(d3, 9, 0))["momentum"] is None   # not again the next morning
+
+
+def test_same_version_mid_month_does_not_rebalance():
+    r, db, br, days, firsts = _momentum_runner(llm_veto=False)
+    m1 = firsts[0]
+    br.today = m1
+    r.tick(at(m1, 9, 0)); br.fill_all(); r.tick(at(m1, 16, 45))
+    d2 = days[days.index(m1) + 2]
+    br.today = d2
+    assert r.tick(at(d2, 9, 0))["momentum"] is None

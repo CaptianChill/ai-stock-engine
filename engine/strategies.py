@@ -121,7 +121,29 @@ def rank_momentum(close: pd.DataFrame, i: int, eligible: set[str], veto_days: se
         recent_news = signals[signals["trade_day"].isin(veto_days)]
         avg = recent_news.groupby("symbol")["signal"].mean()
         vetoed = set(avg[avg < p.veto_threshold].index)
-    return [s for s in mom.index if s not in vetoed][: p.top_n]
+    ranked = [s for s in mom.index if s not in vetoed]
+    if p.max_corr_neighbors <= 0:
+        return ranked[: p.top_n]
+    return _diversify(close.iloc[max(0, i - 1 - p.corr_window): i], ranked, p)
+
+
+def _diversify(window: pd.DataFrame, ranked: list[str], p: MomentumParams) -> list[str]:
+    """Walk the momentum ranking and skip a name that moves with too many names already picked
+    (daily-return correlation above corr_threshold with max_corr_neighbors or more of them).
+    Uses only closes before the trading day, so replay and live see exactly the same picks.
+    This is what keeps a top 15 from turning into one sector bet plus 2x/3x ETFs on that sector."""
+    rets = window[[s for s in ranked if s in window.columns]].pct_change().iloc[1:]
+    corr = rets.corr(min_periods=max(20, p.corr_window // 2)) if len(rets) else pd.DataFrame()
+    picked: list[str] = []
+    for s in ranked:
+        if s in corr.columns and picked:
+            c = corr.loc[s, [x for x in picked if x in corr.columns]]
+            if int((c > p.corr_threshold).sum()) >= p.max_corr_neighbors:
+                continue
+        picked.append(s)
+        if len(picked) == p.top_n:
+            break
+    return picked
 
 
 def momentum_targets(bars: pd.DataFrame, signals: pd.DataFrame | None, eligible: dict[date, set[str]],
