@@ -3,7 +3,13 @@
 An LLM reads company news; rules decide what trades. Two engines, one risk agent with the final
 say, and audit gates that keep it on paper until the evidence is in.
 
-**Active version: v1.1.0 (since 2026-11-11): momentum only, no LLM in the trading path.**
+**Active version: v1.2.0 (since 2026-11-14): momentum only, with a concentration cap.**
+v1.1.0's first rebalance (2026-11-13) bought 7 memory/semiconductor stocks plus 2x and 3x chip ETFs:
+one sector bet. v1.2.0 keeps the same ranking but skips a name that moves with 2 or more names already
+picked (63-day daily-return correlation above 0.7). Switching versions re-picks on the next premarket
+instead of waiting for the 1st of the month. Needs its own `research` run before any live trading.
+
+**v1.1.0 (2026-11-11 to 11-13): momentum only, no LLM in the trading path.**
 v1.0.0 below failed its replay audit: over 880 news trades (Jul-Nov 2026) the news engine averaged
 -0.17% per trade before costs, which is no edge. Base momentum passed its long-history gate, so
 v1.1.0 trades only that: 100% monthly 12-1 momentum, top 15, LLM veto off. Trading no longer needs

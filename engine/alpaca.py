@@ -31,15 +31,23 @@ class _Base:
         self.timeout = timeout
 
     def _req(self, method: str, url: str, **kw) -> dict | list:
-        for attempt in range(5):
-            r = self.s.request(method, url, timeout=self.timeout, **kw)
+        last: Exception | None = None
+        for attempt in range(6):
+            try:
+                r = self.s.request(method, url, timeout=self.timeout, **kw)
+            except (requests.ConnectionError, requests.Timeout) as e:
+                # Wi-Fi and DNS come back a few seconds after the PC wakes from sleep:
+                # wait it out (1+2+4+8+16 s) instead of crashing the stage.
+                last = e
+                time.sleep(2 ** attempt)
+                continue
             if r.status_code == 429 or r.status_code >= 500:
                 time.sleep(2 ** attempt)
                 continue
             if r.status_code >= 400:
                 raise AlpacaError(f"{method} {url} -> {r.status_code}: {r.text[:500]}")
             return r.json() if r.content else {}
-        raise AlpacaError(f"{method} {url} failed after retries")
+        raise AlpacaError(f"{method} {url} failed after retries" + (f": {last!r}"[:300] if last else ""))
 
 
 class DataClient(_Base):

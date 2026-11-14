@@ -36,6 +36,10 @@ class MomentumParams:
     llm_veto: bool = True
     veto_threshold: float = -0.5         # mean news signal over veto window below this = drop
     veto_window_days: int = 10
+    # Concentration control (v1.2.0+). 0 = off, which keeps older versions' numbers unchanged.
+    max_corr_neighbors: int = 0          # skip a name that is highly correlated with this many picks
+    corr_threshold: float = 0.7          # daily-return correlation counted as "moves together"
+    corr_window: int = 63                # trading days of returns used (about 3 months)
 
 
 @dataclass(frozen=True)
@@ -90,9 +94,15 @@ class StrategyVersion:
 # while base momentum passed its long-history gate. v1.1.0 trades only the part that passed:
 # plain 12-1 momentum, no LLM in the trading path (so no API key or credits are needed to trade).
 # The news scorer and its data stay in the repo for research.
+# v1.2.0 (2026-11-14): v1.1.0's first rebalance bought 7 memory/semiconductor stocks plus 2x and 3x
+# chip ETFs, i.e. one sector bet. v1.2.0 is the same momentum ranking, but a name is skipped when it
+# moves with 2+ names already picked (63-day daily-return correlation > 0.7).
 V1_0_0 = StrategyVersion(version="v1.0.0")
-ACTIVE_VERSION = StrategyVersion(version="v1.1.0", news_weight=0.0, momentum_weight=1.0,
-                                 momentum=MomentumParams(llm_veto=False))
+V1_1_0 = StrategyVersion(version="v1.1.0", news_weight=0.0, momentum_weight=1.0,
+                         momentum=MomentumParams(llm_veto=False))
+ACTIVE_VERSION = StrategyVersion(version="v1.2.0", news_weight=0.0, momentum_weight=1.0,
+                                 momentum=MomentumParams(llm_veto=False, max_corr_neighbors=2))
+BUILTIN_VERSIONS = {v.version: v for v in (V1_0_0, V1_1_0, ACTIVE_VERSION)}
 
 
 def uses_llm(sv: StrategyVersion) -> bool:

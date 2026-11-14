@@ -242,3 +242,50 @@ def test_momentum_history_gate_passes_real_trend_fails_noise_and_missing_data():
 def test_momentum_only_drops_news_and_veto():
     mv = momentum_only(make_version())
     assert mv.news_weight == 0 and mv.momentum_weight == 1 and mv.momentum.llm_veto is False
+
+
+# -- v1.2.0 concentration control --------------------------------------------------------------
+def _clustered_close(n_days=300, seed=11):
+    """10 names that all move together (one 'sector', strongest trend) and 10 independent ones."""
+    rng = np.random.default_rng(seed)
+    days = list(pd.bdate_range("2024-01-01", periods=n_days).date)
+    common = rng.normal(0.004, 0.02, n_days)
+    cols = {}
+    for k in range(10):
+        cols[f"C{k}"] = 50 * np.cumprod(1 + common + rng.normal(0, 0.003, n_days))
+    for k in range(10):
+        cols[f"I{k}"] = 50 * np.cumprod(1 + rng.normal(0.001 + 0.0002 * k, 0.02, n_days))
+    return pd.DataFrame(cols, index=days)
+
+
+def test_diversify_caps_names_that_move_together():
+    from dataclasses import replace
+    close = _clustered_close()
+    p = replace(make_version().momentum, top_n=8, lookback_days=120, skip_days=10, llm_veto=False)
+    elig = set(close.columns)
+    plain = st.rank_momentum(close, len(close), elig, set(), None, p)
+    assert sum(s.startswith("C") for s in plain) >= 7            # without the cap: one cluster
+    capped = st.rank_momentum(close, len(close), elig, set(), None, replace(p, max_corr_neighbors=2))
+    assert len(capped) == 8 and sum(s.startswith("C") for s in capped) == 2
+    assert capped[0] == plain[0]                                   # strongest name still first
+
+
+def test_diversify_uses_only_past_closes():
+    from dataclasses import replace
+    close = _clustered_close()
+    p = replace(make_version().momentum, top_n=8, lookback_days=120, skip_days=10, llm_veto=False,
+                max_corr_neighbors=2)
+    i = 250
+    a = st.rank_momentum(close, i, set(close.columns), set(), None, p)
+    tampered = close.copy()
+    tampered.iloc[i:] = tampered.iloc[i:] * np.random.default_rng(0).uniform(0.5, 2, tampered.iloc[i:].shape)
+    assert st.rank_momentum(tampered, i, set(close.columns), set(), None, p) == a
+
+
+def test_versions_without_cap_are_unchanged():
+    from engine.config import V1_1_0, StrategyVersion
+    assert V1_1_0.momentum.max_corr_neighbors == 0
+    old = V1_1_0.to_json()
+    for k in ("max_corr_neighbors", "corr_threshold", "corr_window"):
+        old["momentum"].pop(k)          # what v1.1.0 looks like when stored before this change
+    assert StrategyVersion.from_json(old) == V1_1_0

@@ -51,8 +51,11 @@ def _history_start(start: date) -> date:
 def _version(db, name: str | None):
     """The active version, or a registered candidate (e.g. one the brain proposed and you approved)."""
     from .config import StrategyVersion
+    from .config import BUILTIN_VERSIONS
     if not name or name == ACTIVE_VERSION.version:
         return ACTIVE_VERSION
+    if name in BUILTIN_VERSIONS:
+        return BUILTIN_VERSIONS[name]
     params = db.version_params(name)
     if params is None:
         sys.exit(f"strategy version {name} is not registered")
@@ -361,6 +364,13 @@ def cmd_status(a, s):
 
 
 def main(argv=None):
+    # Windows consoles and redirected logs default to cp1252, which can't print characters like
+    # "≈" that the review brain writes; that crashed `report` every night. Print UTF-8 instead.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     ap = argparse.ArgumentParser(prog="engine")
     sub = ap.add_subparsers(dest="cmd", required=True)

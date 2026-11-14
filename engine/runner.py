@@ -171,7 +171,19 @@ class Runner:
         # the catch-up one missed morning would leave the engine in cash for the whole month.
         mom_detail = None
         month_first = min(d for d in cal if d.year == today.year and d.month == today.month)
-        is_rebalance = today == month_first or not self.db.stage_done(month_first, "momentum_rebalanced")
+        done = self.db.get_stage(month_first, "momentum_rebalanced")
+        done_detail = (done or {}).get("detail") or {}
+        if isinstance(done_detail, str):
+            import json as _json
+            done_detail = _json.loads(done_detail)
+        # A new strategy version re-picks right away instead of waiting for next month. For a
+        # rebalance recorded before versions were stamped, the held positions say which version bought.
+        if "version" in done_detail:
+            version_changed = done_detail["version"] != sv.version
+        else:
+            held_versions = {p.get("version") for p in self.db.open_positions(self.mode, "momentum")}
+            version_changed = bool(done) and bool(held_versions - {sv.version, None})
+        is_rebalance = (today == month_first or not (done and done["status"] == "done") or version_changed)
         if sv.momentum_weight > 0 and is_rebalance:
             close = st.pivot(bars, "close")
             past_days = [d for d in cal if d <= today]
@@ -200,11 +212,12 @@ class Runner:
                     gross += v.qty * it.ref_price
                     held[sym] = held.get(sym, 0) + v.qty
                     submitted += 1
-            mom_detail = {"targets": targets, "catch_up": today != month_first}
+            mom_detail = {"targets": targets, "catch_up": today != month_first,
+                          "version_change": version_changed}
             # Only count the month as done if buying was allowed; otherwise try again tomorrow.
             if targets and not ks and not halted:
                 self.db.mark_stage(month_first, "momentum_rebalanced", "done",
-                                   {"ran_on": str(today), "targets": targets})
+                                   {"ran_on": str(today), "targets": targets, "version": sv.version})
 
         for _, r in picks.iterrows():
             sym = r["symbol"]

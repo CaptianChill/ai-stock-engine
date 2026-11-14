@@ -22,7 +22,7 @@ class DB:
 
     @contextmanager
     def conn(self) -> Iterator[psycopg.Connection]:
-        with psycopg.connect(self.url, row_factory=dict_row) as c:
+        with psycopg.connect(self.url, row_factory=dict_row, connect_timeout=20) as c:
             yield c
 
     # -- schema --------------------------------------------------------------
@@ -76,7 +76,7 @@ class DB:
         """Postgres advisory lock so two schedulers (the PC and GitHub Actions) can never run
         the same stage at the same moment. Yields False if another run holds it."""
         key = f"ase|{day.isoformat()}|{stage}"
-        with psycopg.connect(self.url, autocommit=True) as c:
+        with psycopg.connect(self.url, autocommit=True, connect_timeout=20) as c:
             got = c.execute("select pg_try_advisory_lock(hashtext(%s))", (key,)).fetchone()[0]
             try:
                 yield bool(got)
