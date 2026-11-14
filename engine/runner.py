@@ -34,6 +34,18 @@ EXCHANGES = {"NYSE", "NASDAQ", "ARCA", "AMEX", "BATS"}
 PREMARKET_OPEN_LLM, PREMARKET_OPEN_NO_LLM = time(8, 45), time(7, 0)
 
 
+def _holding(p: dict) -> dict:
+    def f(k):
+        try:
+            return float(p[k]) if p.get(k) not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
+    return {"symbol": p.get("symbol"), "qty": f("qty"), "avg_entry_price": f("avg_entry_price"),
+            "current_price": f("current_price"), "market_value": f("market_value"),
+            "unrealized_pl": f("unrealized_pl"), "unrealized_plpc": f("unrealized_plpc"),
+            "change_today": f("change_today"), "lastday_price": f("lastday_price")}
+
+
 def _trading_days(tc, start: date, end: date) -> list[date]:
     return [date.fromisoformat(c["date"]) for c in tc.calendar(start, end)]
 
@@ -189,6 +201,9 @@ class Runner:
             past_days = [d for d in cal if d <= today]
             veto_days = set(past_days[-sv.momentum.veto_window_days:])
             targets = st.rank_momentum(close, len(close), uni_mom, veto_days, signals, sv.momentum) or []
+            trend = st.market_trend(close, len(close), sv.momentum)
+            risk_off = bool(trend) and not trend["risk_on"]
+            scores = st.momentum_scores(close, len(close), targets, sv.momentum)
             current = {p["symbol"]: p for p in self.db.open_positions(self.mode, "momentum")}
             for sym, p in current.items():
                 if sym not in targets:
@@ -213,11 +228,13 @@ class Runner:
                     held[sym] = held.get(sym, 0) + v.qty
                     submitted += 1
             mom_detail = {"targets": targets, "catch_up": today != month_first,
-                          "version_change": version_changed}
-            # Only count the month as done if buying was allowed; otherwise try again tomorrow.
-            if targets and not ks and not halted:
+                          "version_change": version_changed, "risk_off": risk_off}
+            # Only count the month as done if buying was allowed (or the trend filter chose cash);
+            # otherwise try again tomorrow.
+            if (targets or risk_off) and not ks and not halted:
                 self.db.mark_stage(month_first, "momentum_rebalanced", "done",
-                                   {"ran_on": str(today), "targets": targets, "version": sv.version})
+                                   {"ran_on": str(today), "targets": targets, "version": sv.version,
+                                    "scores": scores, "trend": trend, "risk_off": risk_off})
 
         for _, r in picks.iterrows():
             sym = r["symbol"]
@@ -250,12 +267,20 @@ class Runner:
     def close(self, today: date, cal: list[date]) -> dict:
         self.sync()
         self._stamp_reference_prices(today)
-        equity, _ = self._account()
+        acct = self.tc.account()
+        equity = float(acct["equity"])
+        cash = float(acct["cash"]) if acct.get("cash") is not None else None
         hist = self.db.equity_history(self.mode)
         prev = float(hist["equity"].iloc[-1]) if len(hist) else equity
         pnl = equity - prev
-        self.db.snapshot_equity(today, self.mode, equity, None, pnl)
+        self.db.snapshot_equity(today, self.mode, equity, cash, pnl)
         detail = {"equity": equity, "pnl_day": pnl}
+        # What the account holds right now, for the dashboard (read-only; never used to trade).
+        try:
+            self.db.mark_stage(today, "holdings", "done", {"cash": cash, "equity": equity,
+                               "positions": [_holding(p) for p in self.tc.positions()]})
+        except Exception as e:  # the dashboard must never break the close
+            log.warning("holdings snapshot failed: %r", e)
         nxt = min((d for d in cal if d > today), default=None)
         if prev > 0 and pnl / prev <= -self.sv.risk.daily_loss_stop_pct and nxt:
             self.db.mark_stage(nxt, "entries_halted", "done", {"after_loss_pct": pnl / prev})

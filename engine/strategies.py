@@ -112,6 +112,9 @@ def rank_momentum(close: pd.DataFrame, i: int, eligible: set[str], veto_days: se
     whose bar does not exist yet). Uses closes strictly before position i."""
     if i - 1 - p.lookback_days < 0:
         return None
+    trend = market_trend(close, i, p)
+    if trend is not None and not trend["risk_on"]:
+        return []                      # market below its long average: hold cash this month
     recent = close.iloc[i - 1 - p.skip_days]
     past = close.iloc[i - 1 - p.lookback_days]
     mom = (recent / past - 1).dropna()
@@ -125,6 +128,28 @@ def rank_momentum(close: pd.DataFrame, i: int, eligible: set[str], veto_days: se
     if p.max_corr_neighbors <= 0:
         return ranked[: p.top_n]
     return _diversify(close.iloc[max(0, i - 1 - p.corr_window): i], ranked, p)
+
+
+def market_trend(close: pd.DataFrame, i: int, p: MomentumParams) -> dict | None:
+    """Trend filter state for the day at position i, from closes strictly before i.
+    None when the filter is off or there isn't enough history for the trend symbol."""
+    if p.trend_filter_days <= 0 or p.trend_symbol not in close.columns:
+        return None
+    s = close[p.trend_symbol].iloc[:i].dropna()
+    if len(s) < p.trend_filter_days:
+        return None
+    last, avg = float(s.iloc[-1]), float(s.iloc[-p.trend_filter_days:].mean())
+    return {"symbol": p.trend_symbol, "close": last, "average": avg, "days": p.trend_filter_days,
+            "risk_on": last >= avg, "gap_pct": last / avg - 1}
+
+
+def momentum_scores(close: pd.DataFrame, i: int, symbols: list[str], p: MomentumParams) -> dict[str, float]:
+    """The 12-1 return each name was ranked on (for the dashboard: why it was picked)."""
+    if i - 1 - p.lookback_days < 0:
+        return {}
+    recent, past = close.iloc[i - 1 - p.skip_days], close.iloc[i - 1 - p.lookback_days]
+    return {s: float(recent[s] / past[s] - 1) for s in symbols
+            if s in close.columns and np.isfinite(recent[s]) and np.isfinite(past[s]) and past[s] > 0}
 
 
 def _diversify(window: pd.DataFrame, ranked: list[str], p: MomentumParams) -> list[str]:

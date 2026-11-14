@@ -334,7 +334,8 @@ def test_version_with_llm_still_waits_for_overnight_news():
 
 def test_active_version_is_momentum_only_and_llm_free():
     from engine.config import ACTIVE_VERSION, StrategyVersion, uses_llm
-    assert ACTIVE_VERSION.version == "v1.2.0" and not uses_llm(ACTIVE_VERSION)
+    assert ACTIVE_VERSION.version == "v1.3.0" and not uses_llm(ACTIVE_VERSION)
+    assert ACTIVE_VERSION.momentum.trend_filter_days == 200
     assert ACTIVE_VERSION.momentum.max_corr_neighbors == 2
     assert ACTIVE_VERSION.news_weight == 0 and ACTIVE_VERSION.momentum_weight == 1
     assert StrategyVersion.from_json(ACTIVE_VERSION.to_json()) == ACTIVE_VERSION
@@ -368,3 +369,36 @@ def test_same_version_mid_month_does_not_rebalance():
     d2 = days[days.index(m1) + 2]
     br.today = d2
     assert r.tick(at(d2, 9, 0))["momentum"] is None
+
+
+def test_trend_filter_risk_off_sells_and_counts_the_month_done():
+    from dataclasses import replace
+    import numpy as np
+    r, db, br, days, firsts = _momentum_runner(llm_veto=False)
+    m1, m2 = firsts[0], firsts[1]
+    br.today = m1
+    r.tick(at(m1, 9, 0)); br.fill_all(); r.tick(at(m1, 16, 45))
+    assert len(db.open_positions("paper", "momentum")) == r.sv.momentum.top_n
+    # a falling market index appears; next month the filter says cash
+    spy = pd.DataFrame({"symbol": "SPY", "day": days, "close": 100 * np.cumprod(np.full(len(days), 0.997)),
+                        "volume": 1e9})
+    spy["open"] = spy["high"] = spy["low"] = spy["close"]
+    db.bars = pd.concat([db.bars, spy[db.bars.columns]], ignore_index=True)
+    r.sv = replace(r.sv, momentum=replace(r.sv.momentum, trend_filter_days=60))
+    br.today = m2
+    out = r.tick(at(m2, 9, 0))
+    assert out["momentum"]["risk_off"] is True and out["momentum"]["targets"] == []
+    sells = [o for o in br.orders.values() if o["side"] == "sell" and o["day"] == m2]
+    assert len(sells) == r.sv.momentum.top_n
+    assert db.stage_done(m2, "momentum_rebalanced")
+    detail = db.get_stage(m2, "momentum_rebalanced")["detail"]
+    assert detail["trend"]["risk_on"] is False
+
+
+def test_close_saves_a_holdings_snapshot_for_the_dashboard():
+    r, db, br, days, firsts = _momentum_runner(llm_veto=False)
+    m1 = firsts[0]
+    br.today = m1
+    r.tick(at(m1, 9, 0)); br.fill_all(); r.tick(at(m1, 16, 45))
+    h = db.get_stage(m1, "holdings")["detail"]
+    assert len(h["positions"]) == r.sv.momentum.top_n and h["equity"] > 0

@@ -20,46 +20,49 @@ export default async function handler(req, res) {
     return res.status(401).json({ error: 'pin' });
   }
   const sql = neon(process.env.DATABASE_URL);
-  try {
-    const [progress, gates, runs, newsWeekly, spy, topNews, stages, kill, equity, positions, alerts, brain, proposals] =
-      await Promise.all([
-        sql`select
-              (select reltuples::bigint from pg_class where relname = 'bars') as bars_est,
-              (select count(distinct symbol) from bars where day = (select max(day) from bars)) as symbols_last_day,
-              (select min(day) from bars) as bars_from, (select max(day) from bars) as bars_to,
-              (select reltuples::bigint from pg_class where relname = 'news') as news_est,
-              (select max(published_at) from news) as news_latest,
-              (select count(*) from news_scores) as scored,
-              (select max(scored_at) from news_scores) as scored_latest,
-              (select count(*) from replay_runs) as replays,
-              (select count(*) from audit_results) as audits`,
-        sql`select distinct on (gate) gate, passed, detail, audited_at, version
-              from audit_results order by gate, audited_at desc`,
-        sql`select run_id, version, period_start, period_end, started_at, metrics
+  // Each query stands alone: one failing (e.g. a table the read-only login can't see) blanks
+  // only its own panel instead of the whole page.
+  const q = {
+    equity: sql`select snap_day, equity, cash, pnl_day from equity_snapshots
+                where mode = 'paper' order by snap_day`,
+    holdings: sql`select trade_day, detail, ran_at from run_state where stage = 'holdings'
+                  order by trade_day desc limit 1`,
+    rebalance: sql`select trade_day, detail, ran_at from run_state where stage = 'momentum_rebalanced'
+                   order by trade_day desc limit 1`,
+    positions: sql`select symbol, engine, version, qty, entry_day, entry_price from positions
+                   where status = 'open' and mode = 'paper' order by symbol`,
+    orders: sql`select o.symbol, o.side, o.qty, o.status, o.filled_avg_price, o.filled_qty, o.submitted_at,
+                       d.trade_day, d.engine, d.version, d.risk_status, d.risk_reason, d.reason
+                from orders o left join decisions d using (decision_id)
+                where o.mode = 'paper' order by o.submitted_at desc limit 40`,
+    rejected: sql`select trade_day, symbol, side, risk_reason from decisions
+                  where risk_status = 'rejected' order by created_at desc limit 10`,
+    spyTrend: sql`select (array_agg(close order by day desc))[1] as last, avg(close) as avg200,
+                         count(*)::int as n, max(day) as asof
+                  from (select day, close from bars where symbol = 'SPY' order by day desc limit 200) s`,
+    spy: sql`select day, close from bars where symbol = 'SPY'
+             and day >= coalesce((select min(snap_day) from equity_snapshots where mode = 'paper'), now()::date - 90)
+             order by day`,
+    stages: sql`select trade_day, stage, status, ran_at, detail from run_state
+                where stage in ('premarket', 'exits', 'close') order by ran_at desc limit 15`,
+    kill: sql`select engaged, reason, changed_at from kill_switch where id = 1`,
+    alerts: sql`select raised_at, kind, detail from monitor_alerts order by raised_at desc limit 8`,
+    gates: sql`select distinct on (gate) gate, passed, audited_at, version
+               from audit_results order by gate, audited_at desc`,
+    runs: sql`select run_id, version, period_start, period_end, started_at, metrics
               from replay_runs order by run_id desc limit 5`,
-        sql`select date_trunc('week', published_at)::date as wk, count(*)::int as n
-              from news where published_at > now() - interval '26 weeks' group by 1 order by 1`,
-        sql`select date_trunc('month', day)::date as m, (array_agg(close order by day desc))[1] as close
-              from bars where symbol = 'SPY' and day > now() - interval '3 years' group by 1 order by 1`,
-        sql`select s.symbol, s.label, s.confidence, n.headline, n.published_at
-              from news_scores s join news n using (news_id)
-              where s.label <> 'irrelevant' order by n.published_at desc limit 12`,
-        sql`select trade_day, stage, status, ran_at from run_state order by ran_at desc limit 12`,
-        sql`select engaged, reason, changed_at from kill_switch where id = 1`,
-        sql`select snap_day, mode, equity, pnl_day from equity_snapshots order by snap_day desc limit 60`,
-        sql`select symbol, engine, mode, qty, entry_day, exit_due, entry_price from positions
-              where status = 'open' order by entry_day desc limit 30`,
-        sql`select raised_at, kind, detail from monitor_alerts order by raised_at desc limit 10`,
-        sql`select report_day, review, created_at from brain_reports order by report_day desc limit 1`,
-        sql`select proposal_id, param, old_value, new_value, rationale, status, created_at
-              from brain_proposals order by proposal_id desc limit 10`,
-      ]);
-    return res.status(200).json({
-      now: new Date().toISOString(),
-      progress: progress[0], gates, runs, newsWeekly, spy, topNews, stages,
-      kill: kill[0] || null, equity, positions, alerts, brain: brain[0] || null, proposals,
-    });
-  } catch (e) {
-    return res.status(500).json({ error: 'db', message: String(e.message || e).slice(0, 300) });
+    brain: sql`select report_day, review, created_at from brain_reports order by report_day desc limit 1`,
+  };
+  const keys = Object.keys(q);
+  const settled = await Promise.allSettled(Object.values(q));
+  const out = { now: new Date().toISOString(), errors: {} };
+  settled.forEach((r, i) => {
+    if (r.status === 'fulfilled') out[keys[i]] = r.value;
+    else { out[keys[i]] = null; out.errors[keys[i]] = String(r.reason?.message || r.reason).slice(0, 200); }
+  });
+  for (const k of ['holdings', 'rebalance', 'kill', 'spyTrend', 'brain']) out[k] = out[k]?.[0] || null;
+  if (keys.every((k) => out.errors[k])) {
+    return res.status(500).json({ error: 'db', message: Object.values(out.errors)[0] });
   }
+  return res.status(200).json(out);
 }

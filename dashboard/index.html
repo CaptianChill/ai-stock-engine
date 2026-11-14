@@ -60,6 +60,21 @@
   .pill { display: inline-block; font-size: 12px; padding: 1px 8px; border-radius: 99px; border: 1px solid var(--line); }
   .good { color: var(--ok); } .badl { color: var(--bad); }
   [hidden] { display: none !important; }
+  #holdings td, #orders td { white-space: nowrap; }
+
+  .tile .v.up, td.up, .up { color: var(--ok); } .tile .v.down, td.down, .down { color: var(--bad); }
+  .chip { display:inline-flex; align-items:center; gap:6px; font-size:13px; padding:3px 10px; border-radius:99px; border:1px solid var(--line); background: var(--panel); }
+  .dot { width:8px; height:8px; border-radius:50%; background: var(--muted); } .dot.ok { background: var(--ok);} .dot.warn{ background: var(--warn);} .dot.bad{ background: var(--bad);}
+  .wbar { height:6px; border-radius:3px; background: var(--accent2); position:relative; min-width:60px; }
+  .wbar i { position:absolute; left:0; top:0; bottom:0; border-radius:3px; background: var(--accent); }
+  .legend { display:flex; gap:14px; font-size:12px; color: var(--muted); margin: 0 0 6px; }
+  .legend span::before { content:""; display:inline-block; width:14px; height:3px; border-radius:2px; margin-right:6px; vertical-align:middle; background: var(--c); }
+  .rules { margin: 0; padding-left: 18px; } .rules li { margin: 4px 0; }
+  .big { font-size: 34px; font-weight: 650; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+  .hero { display:flex; flex-wrap:wrap; gap: 8px 28px; align-items: baseline; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+  .meter { height: 8px; border-radius: 4px; background: var(--accent2); position: relative; margin-top: 6px; }
+  .meter i { position:absolute; left:0; top:0; bottom:0; border-radius:4px; }
 </style>
 </head>
 <body>
@@ -80,7 +95,7 @@
     <header class="bar">
       <div>
         <h1>AI Stock Engine</h1>
-        <p class="lead lock">Validation run: <b id="current">—</b>. Live trading is <b id="lockword">—</b>.</p>
+        <p class="lead"><span id="modeword">Paper money</span> · strategy <b id="version">—</b> · <span id="health" class="chip"><span class="dot"></span><span>—</span></span></p>
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         <span class="note" id="updated" style="margin:0"></span>
@@ -90,62 +105,91 @@
     </header>
 
     <section class="card">
-      <h2>Validation run progress</h2>
-      <p class="note">The five stages the research run on your PC works through. Refreshes every 60 seconds.</p>
-      <ol class="steps" id="steps"></ol>
+      <div class="hero">
+        <div><div class="note" style="margin:0">Account value</div><div class="big" id="acct">—</div></div>
+        <div><div class="note" style="margin:0">Today</div><div class="big" id="today">—</div></div>
+        <div><div class="note" style="margin:0">Since start</div><div class="big" id="since">—</div></div>
+        <div><div class="note" style="margin:0">S&amp;P 500 same period</div><div class="big" id="spysince">—</div></div>
+      </div>
+      <p class="note" id="herosub" style="margin:8px 0 0"></p>
     </section>
 
     <section class="tiles" id="tiles"></section>
 
     <section class="card">
-      <h2>Audit gates</h2>
-      <p class="note">Every gate must pass before real money can be used. "Not run" means the run hasn't reached it yet.</p>
-      <div class="scroll"><table><thead><tr><th>Gate</th><th>Status</th><th>What it checks</th></tr></thead><tbody id="gates"></tbody></table></div>
+      <h2>What the bot owns right now</h2>
+      <p class="note" id="holdnote">Prices are from the last market close the bot recorded.</p>
+      <div class="scroll"><table>
+        <thead><tr><th>Stock</th><th>Shares</th><th>Bought at</th><th>Last price</th><th>Value</th><th>Gain / loss</th><th>Last day</th><th>Why it was picked</th><th>Share of account</th></tr></thead>
+        <tbody id="holdings"></tbody></table></div>
+    </section>
+
+    <section class="card">
+      <h2>Your account vs. the S&amp;P 500</h2>
+      <p class="note">Percent gained or lost since paper trading started. Above the gray line means the bot is beating the market.</p>
+      <div class="legend"><span style="--c: var(--accent)">Your bot</span><span style="--c: var(--muted)">S&amp;P 500 (SPY)</span></div>
+      <div class="chart" id="vsChart"></div>
     </section>
 
     <div class="grid">
-      <section class="card"><h2>News collected per week</h2><p class="note">Company headlines the AI reads.</p><div class="chart" id="newsChart"></div></section>
-      <section class="card"><h2>S&amp;P 500 (SPY), monthly close</h2><p class="note">The market backdrop for the replay.</p><div class="chart" id="spyChart"></div></section>
+      <section class="card">
+        <h2>Recent orders</h2>
+        <p class="note">Every buy and sell the bot sent to the broker.</p>
+        <div class="scroll"><table><thead><tr><th>Day</th><th>Stock</th><th>Action</th><th>Shares</th><th>Fill price</th><th>Status</th></tr></thead><tbody id="orders"></tbody></table></div>
+      </section>
+      <section class="card">
+        <h2>How the bot decides</h2>
+        <p class="note">The rules for the strategy version running now. They never change unless the version changes.</p>
+        <ol class="rules" id="rules"></ol>
+      </section>
     </div>
 
     <div class="grid">
-      <section class="card"><h2>Paper account</h2><p class="note">Equity snapshots from paper trading.</p><div class="chart" id="eqChart"></div>
-        <div class="scroll"><table><thead><tr><th>Open position</th><th>Engine</th><th>Qty</th><th>Entered</th><th>Exit due</th></tr></thead><tbody id="positions"></tbody></table></div></section>
-      <section class="card"><h2>Latest AI headline calls</h2><p class="note">Most recent good/bad labels.</p>
-        <div class="scroll"><table><thead><tr><th>Stock</th><th>Call</th><th>Headline</th></tr></thead><tbody id="news"></tbody></table></div></section>
+      <section class="card"><h2>Safety checks</h2><p class="note">The guards that stop trading. All exits are always allowed.</p><div id="safety"></div></section>
+      <section class="card"><h2>Is the PC running it?</h2><p class="note">The last trading steps your PC ran, and any alerts.</p><div id="ops"></div></section>
     </div>
 
-    <div class="grid">
-      <section class="card"><h2>Review brain</h2><p class="note">Nightly review and parameter proposals (they wait for your approval).</p><div id="brain"></div></section>
-      <section class="card"><h2>Alerts &amp; scheduler</h2><p class="note">Monitor alerts and the last stages the PC ran.</p><div id="ops"></div></section>
-    </div>
+    <section class="card">
+      <h2>Live-money checklist</h2>
+      <p class="note">Every check must pass before real money can be used. Run <b>research.cmd</b> on the PC to test a new version.</p>
+      <div class="scroll"><table><thead><tr><th>Check</th><th>Status</th><th>What it proves</th></tr></thead><tbody id="gates"></tbody></table></div>
+      <div id="replay" style="margin-top:10px"></div>
+    </section>
 
-    <p class="note">Not financial advice. Passing gates proves the evidence is sound, not that the strategy will make money. This page is read-only.</p>
+    <section class="card"><h2>Nightly review</h2><div id="brain"></div></section>
+
+    <p class="note">Not financial advice. Paper results and backtests don't guarantee future returns. This page is read-only: nothing here can place or change a trade.</p>
   </div>
 </main>
 
 <script>
 (() => {
   const GATES = [
-    ['no_lookahead', 'Uses only news after the AI\'s training cutoff; every signal predates the trade.'],
-    ['cost_stress', 'Still profitable at double the assumed trading costs.'],
-    ['out_of_sample', 'Last 40% of the period is profitable with frozen settings.'],
-    ['overfitting', 'Deflated Sharpe ≥ 0.95 given every version tried.'],
-    ['decay_haircut', 'Still profitable with half the measured edge.'],
-    ['concentration', 'No single stock or day is more than 25% of profit.'],
-    ['min_sample', 'At least 60 days and 100 news trades.'],
-    ['momentum_history', 'Momentum alone holds up on price history since 2016.'],
-    ['independent_reproduction', 'A separate implementation re-derives every trade and agrees.'],
-    ['paper_run_completed', 'At least one full paper-trading day.'],
-    ['paper_match', 'Paper fills match the prices the replay assumed.'],
-    ['kill_switch_tested', 'Self-test proved the emergency stop works.'],
+    ['no_lookahead', 'The backtest never used information from the future.'],
+    ['cost_stress', 'Still profitable when trading costs are doubled.'],
+    ['out_of_sample', 'The most recent 40% of the history, untouched while designing, is profitable.'],
+    ['overfitting', 'The result is not luck from trying many versions.'],
+    ['decay_haircut', 'Still profitable if the edge is only half as strong.'],
+    ['concentration', 'No single stock or day made most of the profit.'],
+    ['min_sample', 'Enough days and trades to judge.'],
+    ['momentum_history', 'Holds up on price history back to 2016.'],
+    ['independent_reproduction', 'A second, separate program re-checked every trade.'],
+    ['paper_run_completed', 'Ran on paper money for real days.'],
+    ['paper_match', 'Paper fills matched the prices the backtest assumed.'],
+    ['kill_switch_tested', 'The emergency stop was tested and works.'],
   ];
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const num = (v) => v == null || v === '' || !isFinite(Number(v)) ? null : Number(v);
+  const usd = (v, d = 0) => num(v) == null ? '—' : Number(v).toLocaleString(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: d, maximumFractionDigits: d });
+  const sgnUsd = (v) => num(v) == null ? '—' : (v >= 0 ? '+' : '−') + usd(Math.abs(v));
+  const pct = (v, d = 1) => num(v) == null ? '—' : (v >= 0 ? '+' : '−') + Math.abs(v * 100).toFixed(d) + '%';
+  const cls = (v) => num(v) == null || v === 0 ? '' : v > 0 ? 'up' : 'down';
   const fmt = (n) => n == null ? '—' : Number(n).toLocaleString();
   const ago = (t) => { if (!t) return '—'; const m = Math.round((Date.now() - new Date(t)) / 60000);
     return m < 1 ? 'just now' : m < 60 ? m + ' min ago' : m < 1440 ? Math.round(m/60) + ' h ago' : Math.round(m/1440) + ' d ago'; };
   const day = (t) => t ? String(t).slice(0, 10) : '—';
+  const nice = (t) => t ? new Date(String(t).slice(0, 10) + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '—';
 
   let PIN = null; try { PIN = localStorage.getItem('mc_pin'); } catch {}
   let timer = null;
@@ -154,8 +198,9 @@
     const r = await fetch('/api/data', { headers: { 'x-pin': PIN || '' } });
     const j = await r.json().catch(() => ({}));
     if (r.status === 401) { lock('Wrong PIN.'); return; }
-    if (!r.ok) { showApp(); $('current').textContent = j.message || 'data unavailable'; return; }
-    showApp(); render(j);
+    showApp();
+    if (!r.ok) { $('herosub').textContent = j.message || 'Data unavailable right now.'; return; }
+    render(j);
   }
   function showApp() { $('gate').hidden = true; $('app').hidden = false; }
   function lock(msg) {
@@ -172,91 +217,151 @@
   function start() { load(); clearInterval(timer); timer = setInterval(load, 60000); }
   if (PIN) start();
 
+  function nextRebalance() {
+    const n = new Date(); const d = new Date(n.getFullYear(), n.getMonth() + 1, 1);
+    while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+    return d;
+  }
+
   function render(d) {
-    const p = d.progress || {};
-    const gates = Object.fromEntries((d.gates || []).map((g) => [g.gate, g]));
-    const scored = Number(p.scored || 0), news = Number(p.news_est || 0), bars = Number(p.bars_est || 0);
-    const scoreStale = scored > 0 && p.scored_latest && (Date.now() - new Date(p.scored_latest)) > 3 * 3600e3;
-    const stepState = {
-      prices: bars > 0 ? (Number(p.symbols_last_day) >= 1000 ? ['done', fmt(bars) + ' daily bars'] : ['active', fmt(bars) + ' bars so far']) : ['waiting', 'not started'],
-      news: news > 0 ? ['done', fmt(news) + ' headlines'] : (bars > 0 ? ['active', 'downloading'] : ['waiting', 'waiting']),
-      scoring: scored > 0 ? (d.runs?.length ? ['done', fmt(scored) + ' scored'] : [scoreStale ? 'stuck' : 'active', fmt(scored) + ' scored · last ' + ago(p.scored_latest)]) : (news > 0 ? ['active', 'starting — 0 scored'] : ['waiting', 'waiting']),
-      replay: d.runs?.length ? ['done', 'run #' + d.runs[0].run_id] : ['waiting', 'waiting'],
-      audit: (d.gates || []).length ? [GATES.every(([g]) => gates[g]?.passed) ? 'done' : 'active', (d.gates.filter((g) => g.passed).length) + ' of ' + GATES.length + ' passing'] : ['waiting', 'waiting'],
-    };
-    const names = [['prices','Download prices'],['news','Download news'],['scoring','AI scores headlines'],['replay','Replay with costs'],['audit','Audit gates']];
-    $('steps').innerHTML = names.map(([k, t], i) => `<li class="step"><div class="n">Step ${i+1}</div><div class="t">${t}</div><div class="st ${stepState[k][0]}">${esc(stepState[k][1])}</div></li>`).join('');
-    const cur = names.find(([k]) => stepState[k][0] !== 'done');
-    $('current').textContent = cur ? cur[1].toLowerCase() + (stepState[cur[0]][0] === 'stuck' ? ' (stalled)' : '') : 'complete';
-    const allPass = GATES.every(([g]) => gates[g]?.passed);
-    $('lockword').textContent = allPass ? 'unlockable' : 'locked'; $('lockword').className = allPass ? 'unlocked' : 'locked';
+    const eq = (d.equity || []).map((r) => ({ day: day(r.snap_day), equity: num(r.equity), cash: num(r.cash), pnl: num(r.pnl_day) }));
+    const last = eq[eq.length - 1], first = eq[0];
+    const hold = d.holdings?.detail || null;
+    const reb = d.rebalance?.detail || {};
+    const version = reb.version || (d.positions || [])[0]?.version || '—';
+    $('version').textContent = version;
 
-    const m = d.runs?.[0]?.metrics || {};
-    const pct = (x) => x == null ? '—' : (x * 100).toFixed(1) + '%';
+    // hero numbers
+    const acct = num(hold?.equity) ?? last?.equity;
+    $('acct').textContent = usd(acct);
+    $('today').textContent = sgnUsd(last?.pnl); $('today').className = 'big ' + cls(last?.pnl);
+    const since = first && last ? last.equity / first.equity - 1 : null;
+    $('since').textContent = pct(since); $('since').className = 'big ' + cls(since);
+    const spy = (d.spy || []).map((r) => [day(r.day), num(r.close)]);
+    const spySince = spy.length >= 2 ? spy[spy.length - 1][1] / spy[0][1] - 1 : null;
+    $('spysince').textContent = pct(spySince); $('spysince').className = 'big ' + cls(spySince);
+    $('herosub').textContent = first ? `Started ${nice(first.day)} with ${usd(first.equity)} of paper money · last close recorded ${nice(last.day)}` +
+      (since != null && spySince != null ? ` · ${since >= spySince ? 'ahead of' : 'behind'} the S&P 500 by ${Math.abs((since - spySince) * 100).toFixed(1)} points` : '') : 'No trading days recorded yet.';
+
+    // tiles
+    const positions = hold?.positions || [];
+    const invested = positions.reduce((s, p) => s + (num(p.market_value) || 0), 0);
+    const cash = num(hold?.cash) ?? last?.cash;
+    const peak = eq.reduce((m, r) => Math.max(m, r.equity || 0), 0);
+    const dd = peak && acct ? acct / peak - 1 : null;
+    const t = d.spyTrend; const tLast = num(t?.last), tAvg = num(t?.avg200);
+    const trendOn = tLast != null && tAvg != null && t.n >= 200 ? tLast >= tAvg : null;
     const tiles = [
-      ['Price bars', fmt(bars), p.bars_from ? day(p.bars_from) + ' → ' + day(p.bars_to) : ''],
-      ['Headlines', fmt(news), 'latest ' + ago(p.news_latest)],
-      ['AI-scored', fmt(scored), p.scored_latest ? 'last ' + ago(p.scored_latest) : 'none yet'],
-      ['Replay return', pct(m.total_return), m.sharpe != null ? 'Sharpe ' + Number(m.sharpe).toFixed(2) : 'no replay yet'],
-      ['Gates passing', (d.gates || []).filter((g) => g.passed).length + ' / ' + GATES.length, 'live needs all'],
-      ['Kill switch', d.kill?.engaged ? 'ON' : 'off', d.kill?.reason || 'trading allowed'],
+      ['Invested', usd(invested), acct ? Math.round(invested / acct * 100) + '% of the account' : '', ''],
+      ['Cash', usd(cash), 'not in any stock', ''],
+      ['Stocks held', String(positions.length || (d.positions || []).length), 'target: 15', ''],
+      ['Market trend', trendOn == null ? '—' : trendOn ? 'Up' : 'Down', tLast != null ? (trendOn ? 'buying stocks · ' : 'holding cash · ') + `S&P ${pct(tLast / tAvg - 1)} vs 200-day avg` : 'needs 200 days of SPY', trendOn == null ? '' : trendOn ? 'up' : 'down'],
+      ['Drop from peak', dd == null ? '—' : pct(dd), 'bot stops buying at −15%', dd != null && dd <= -0.10 ? 'down' : ''],
+      ['Next rebalance', nextRebalance().toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), 'first trading day of the month', ''],
     ];
-    $('tiles').innerHTML = tiles.map(([k, v, s]) => `<div class="tile"><div class="k">${k}</div><div class="v">${esc(v)}</div><div class="s">${esc(s)}</div></div>`).join('');
+    $('tiles').innerHTML = tiles.map(([k, v, s, c]) => `<div class="tile"><div class="k">${k}</div><div class="v ${c}">${esc(v)}</div><div class="s">${esc(s)}</div></div>`).join('');
 
+    // holdings
+    const scores = reb.scores || {};
+    const rows = positions.length ? positions : (d.positions || []).map((p) => ({ symbol: p.symbol, qty: num(p.qty), avg_entry_price: num(p.entry_price) }));
+    rows.sort((a, b) => (num(b.market_value) || 0) - (num(a.market_value) || 0));
+    $('holdnote').textContent = d.holdings ? `Prices from the close on ${nice(d.holdings.trade_day)}. Picked on ${reb.ran_on ? nice(reb.ran_on) : '—'}${reb.risk_off ? ' — market trend was down, so the bot chose cash.' : '.'}` : 'Prices appear after the bot\'s next market-close run.';
+    $('holdings').innerHTML = rows.length ? rows.map((p) => {
+      const w = acct && num(p.market_value) ? p.market_value / acct : null;
+      const why = scores[p.symbol] != null ? `Up ${(scores[p.symbol] * 100).toFixed(0)}% over the past year` : '<span class="d">bought by an earlier version</span>';
+      const cp = num(p.lastday_price) && num(p.current_price) ? p.current_price / p.lastday_price - 1 : num(p.change_today);
+      return `<tr><td><b>${esc(p.symbol)}</b></td><td>${fmt(p.qty)}</td><td>${usd(p.avg_entry_price, 2)}</td><td>${usd(p.current_price, 2)}</td><td>${usd(p.market_value)}</td>` +
+        `<td class="${cls(p.unrealized_pl)}">${sgnUsd(p.unrealized_pl)} <span class="d">${pct(num(p.unrealized_plpc))}</span></td>` +
+        `<td class="${cls(cp)}">${pct(cp)}</td><td>${why}</td>` +
+        `<td>${w == null ? '—' : `<div class="wbar" title="${(w*100).toFixed(1)}%"><i style="width:${Math.min(100, w * 1000).toFixed(0)}%"></i></div><span class="d">${(w*100).toFixed(1)}%</span>`}</td></tr>`;
+    }).join('') : `<tr><td colspan="9" class="empty">${reb.risk_off ? 'Holding cash: the market is below its 200-day average.' : 'No stocks held right now.'}</td></tr>`;
+
+    // account vs SPY
+    const spyMap = Object.fromEntries(spy);
+    const s0 = spy.length ? spy[0][1] : null;
+    const pts = eq.map((r) => [r.day, first ? (r.equity / first.equity - 1) * 100 : null, spyMap[r.day] && s0 ? (spyMap[r.day] / s0 - 1) * 100 : null]);
+    lines($('vsChart'), pts, 'No trading days recorded yet.');
+
+    // orders
+    const orders = d.orders || [];
+    $('orders').innerHTML = orders.length ? orders.slice(0, 25).map((o) => {
+      const st = String(o.status || ''); const ok = st === 'filled'; const bad = st.startsWith('error') || ['rejected', 'canceled', 'expired'].includes(st);
+      return `<tr><td>${nice(o.trade_day || o.submitted_at)}</td><td><b>${esc(o.symbol)}</b></td><td class="${o.side === 'buy' ? 'up' : 'down'}">${o.side === 'buy' ? 'Buy' : 'Sell'}</td>` +
+        `<td>${fmt(o.filled_qty ?? o.qty)}</td><td>${usd(o.filled_avg_price, 2)}</td><td class="${ok ? 'pass' : bad ? 'fail' : 'active'}">${esc(st.slice(0, 40))}</td></tr>`;
+    }).join('') : '<tr><td colspan="6" class="empty">No orders yet.</td></tr>';
+
+    // rules
+    const rules = [
+      'Looks at the ~500 most-traded U.S. stocks over $5.',
+      'Ranks them by how much they rose over the past 12 months, skipping the most recent month (the classic "12-1 momentum" signal).',
+      'Buys the top 15, about equal dollars each, on the first trading day of each month. Holds them until the next month.',
+      'Skips a stock that moves in lockstep with 2 or more stocks already picked, so it can\'t pile into one sector.',
+      'Market trend filter: if the S&P 500 is below its 200-day average on rebalance day, it holds cash for the month instead.',
+      'Never borrows money, never shorts, and no stock can be more than 10% of the account.',
+      'Stops new buys for a day after a 3% daily loss, and fully stops buying after a 15% drop from the peak.',
+    ];
+    $('rules').innerHTML = rules.map((r) => `<li>${esc(r)}</li>`).join('');
+
+    // safety
+    const k = d.kill;
+    const ddp = dd == null ? 0 : Math.min(1, Math.abs(Math.min(dd, 0)) / 0.15);
+    $('safety').innerHTML = `<p><b>Emergency stop:</b> <span class="${k?.engaged ? 'fail' : 'pass'}">${k?.engaged ? 'ON — no new buys' : 'off — trading allowed'}</span>${k?.engaged && k.reason ? ' <span class="d">(' + esc(k.reason) + ')</span>' : ''}</p>` +
+      `<p style="margin-bottom:2px"><b>Distance to the 15% stop:</b> ${dd == null ? '—' : (Math.max(0, 15 + dd * 100)).toFixed(1) + ' points left'}</p>` +
+      `<div class="meter"><i style="width:${(ddp * 100).toFixed(0)}%;background:${ddp > .66 ? 'var(--bad)' : ddp > .33 ? 'var(--warn)' : 'var(--ok)'}"></i></div>` +
+      ((d.rejected || []).length ? `<p class="note" style="margin-top:12px">Blocked by the risk checks recently:</p><table><tbody>${d.rejected.slice(0, 5).map((r) => `<tr><td>${nice(r.trade_day)}</td><td>${esc(r.symbol)} ${esc(r.side)}</td><td class="d">${esc(r.risk_reason)}</td></tr>`).join('')}</tbody></table>` : '');
+
+    // ops / health
+    const stages = d.stages || [];
+    const lastRun = stages[0]?.ran_at;
+    const failed = stages.find((s) => s.status === 'failed');
+    const hrs = lastRun ? (Date.now() - new Date(lastRun)) / 3600e3 : null;
+    const wk = [1, 2, 3, 4, 5].includes(new Date().getDay());
+    const healthCls = failed && stages.indexOf(failed) < 3 ? 'bad' : hrs != null && wk && hrs > 26 ? 'warn' : 'ok';
+    const healthTxt = healthCls === 'bad' ? 'Last step failed' : healthCls === 'warn' ? 'PC hasn\'t run in a while' : 'Running';
+    $('health').innerHTML = `<span class="dot ${healthCls}"></span><span>${healthTxt} · last run ${ago(lastRun)}</span>`;
+    const stageName = { premarket: 'Morning (buys/sells)', exits: 'Afternoon check', close: 'After close (records)' };
+    $('ops').innerHTML = (stages.length ? '<table><thead><tr><th>Step</th><th>Day</th><th>Result</th></tr></thead><tbody>' +
+        stages.slice(0, 8).map((s) => `<tr><td>${esc(stageName[s.stage] || s.stage)}</td><td>${nice(s.trade_day)}</td><td class="${s.status === 'done' ? 'pass' : 'fail'}">${s.status === 'done' ? 'OK' : esc(s.status)}${s.status !== 'done' && s.detail?.error ? ' <span class="d">' + esc(String(s.detail.error).slice(0, 90)) + '</span>' : ''}</td></tr>`).join('') + '</tbody></table>'
+        : '<p class="empty">The PC hasn\'t run a trading step yet.</p>') +
+      ((d.alerts || []).length ? '<p class="note" style="margin-top:12px">Alerts</p><table><tbody>' +
+        d.alerts.map((a) => `<tr><td>${ago(a.raised_at)}</td><td>${esc(a.kind)}</td></tr>`).join('') + '</tbody></table>' : '');
+
+    // gates
+    const gates = Object.fromEntries((d.gates || []).filter((g) => g.version === version).map((g) => [g.gate, g]));
     $('gates').innerHTML = GATES.map(([g, desc]) => {
-      const r = gates[g]; const cls = !r ? 'notrun' : r.passed ? 'pass' : 'fail';
-      const label = !r ? 'Not run' : (r.passed ? 'Pass' : 'Fail') + ' · ' + day(r.audited_at);
-      return `<tr><td>${g.replace(/_/g, ' ')}</td><td class="${cls}">${label}</td><td class="d">${esc(desc)}</td></tr>`;
+      const r = gates[g]; const c = !r ? 'notrun' : r.passed ? 'pass' : 'fail';
+      const label = !r ? 'Not tested yet' : (r.passed ? 'Pass' : 'Fail') + ' · ' + nice(r.audited_at);
+      return `<tr><td>${g.replace(/_/g, ' ')}</td><td class="${c}">${label}</td><td class="d">${esc(desc)}</td></tr>`;
     }).join('');
-
-    line($('newsChart'), (d.newsWeekly || []).map((r) => [r.wk, Number(r.n)]), true);
-    line($('spyChart'), (d.spy || []).map((r) => [r.m, Number(r.close)]), false);
-    const eq = (d.equity || []).filter((r) => r.mode === 'paper').reverse();
-    line($('eqChart'), eq.map((r) => [r.snap_day, Number(r.equity)]), false, 'No paper-trading snapshots yet.');
-
-    $('positions').innerHTML = (d.positions || []).length ? d.positions.map((r) =>
-      `<tr><td>${esc(r.symbol)}</td><td>${esc(r.engine)}</td><td>${fmt(r.qty)}</td><td>${day(r.entry_day)}</td><td>${day(r.exit_due)}</td></tr>`).join('')
-      : '<tr><td colspan="5" class="empty">No open positions.</td></tr>';
-
-    $('news').innerHTML = (d.topNews || []).length ? d.topNews.map((r) =>
-      `<tr><td>${esc(r.symbol)}</td><td class="${r.label === 'good' ? 'good' : 'badl'}">${esc(r.label)} ${Math.round(r.confidence * 100)}%</td><td class="d">${esc(r.headline)}</td></tr>`).join('')
-      : '<tr><td colspan="3" class="empty">No headlines scored yet.</td></tr>';
+    const run = (d.runs || []).find((r) => r.version === version);
+    const m = run?.metrics || {};
+    $('replay').innerHTML = run ? `<p class="note" style="margin:0">Backtest of ${esc(version)} (${day(run.period_start)} → ${day(run.period_end)}): yearly return <b>${pct(m.annual_return)}</b>, worst drop <b>${pct(m.max_drawdown)}</b>, Sharpe <b>${num(m.sharpe) == null ? '—' : Number(m.sharpe).toFixed(2)}</b>.</p>`
+      : `<p class="note" style="margin:0">No backtest for ${esc(version)} yet. Double-click <b>research.cmd</b> in the ai-stock-engine\\windows folder on your PC.</p>`;
 
     const b = d.brain;
-    const review = b?.review ? (b.review.summary || b.review.findings || JSON.stringify(b.review)).toString().slice(0, 600) : null;
-    $('brain').innerHTML = (b ? `<p><b>${day(b.report_day)}</b> — ${esc(review)}</p>` : '<p class="empty">No nightly review yet.</p>') +
-      ((d.proposals || []).length ? '<table><thead><tr><th>#</th><th>Setting</th><th>Change</th><th>Status</th></tr></thead><tbody>' +
-        d.proposals.map((r) => `<tr><td>${r.proposal_id}</td><td>${esc(r.param)}</td><td>${esc(JSON.stringify(r.old_value))} → ${esc(JSON.stringify(r.new_value))}</td><td><span class="pill">${esc(r.status)}</span></td></tr>`).join('') + '</tbody></table>' : '');
-
-    $('ops').innerHTML = ((d.alerts || []).length ? '<table><thead><tr><th>When</th><th>Alert</th></tr></thead><tbody>' +
-        d.alerts.map((a) => `<tr><td>${ago(a.raised_at)}</td><td>${esc(a.kind)}</td></tr>`).join('') + '</tbody></table>' : '<p class="empty">No alerts.</p>') +
-      ((d.stages || []).length ? '<table style="margin-top:12px"><thead><tr><th>Stage</th><th>Day</th><th>Status</th></tr></thead><tbody>' +
-        d.stages.map((s) => `<tr><td>${esc(s.stage)}</td><td>${day(s.trade_day)}</td><td class="${s.status === 'done' ? 'pass' : s.status === 'error' ? 'fail' : ''}">${esc(s.status)}</td></tr>`).join('') + '</tbody></table>' : '<p class="empty">The scheduler hasn\'t run a trading stage yet.</p>');
+    const review = b?.review ? (b.review.summary || '').toString().slice(0, 700) : null;
+    $('brain').innerHTML = b ? `<p><b>${nice(b.report_day)}</b> — ${esc(review)}</p>` : '<p class="empty">No nightly review yet.</p>';
 
     $('updated').textContent = 'Updated ' + new Date(d.now).toLocaleTimeString();
   }
 
-  function line(el, pts, bars, emptyMsg) {
-    if (pts.length < 2) { el.innerHTML = `<p class="empty">${emptyMsg || 'Not enough data yet.'}</p>`; return; }
-    const W = 600, H = 200, L = 46, R = 8, T = 10, B = 22;
-    const ys = pts.map((p) => p[1]); let lo = bars ? 0 : Math.min(...ys), hi = Math.max(...ys);
-    if (hi === lo) hi = lo + 1; const pad = (hi - lo) * 0.06; if (!bars) lo -= pad; hi += pad;
+  function lines(el, pts, emptyMsg) {
+    pts = pts.filter((p) => p[1] != null);
+    if (pts.length < 2) { el.innerHTML = `<p class="empty">${emptyMsg}</p>`; return; }
+    const W = 600, H = 200, L = 44, R = 8, T = 10, B = 22;
+    const ys = pts.flatMap((p) => [p[1], p[2]]).filter((v) => v != null);
+    let lo = Math.min(0, ...ys), hi = Math.max(0, ...ys); if (hi === lo) hi = lo + 1;
+    const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
     const x = (i) => L + (i / (pts.length - 1)) * (W - L - R), y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
-    const short = (v) => Math.abs(v) >= 1e6 ? (v/1e6).toFixed(1) + 'M' : Math.abs(v) >= 1e3 ? (v/1e3).toFixed(1) + 'k' : v.toFixed(0);
     let g = '';
     for (let k = 0; k <= 3; k++) { const v = lo + (hi - lo) * k / 3, yy = y(v);
-      g += `<line x1="${L}" x2="${W-R}" y1="${yy}" y2="${yy}" stroke="var(--line)"/><text x="${L-6}" y="${yy+4}" text-anchor="end">${short(v)}</text>`; }
-    const lab = [0, Math.floor(pts.length / 2), pts.length - 1];
-    lab.forEach((i) => g += `<text x="${x(i)}" y="${H-6}" text-anchor="${i === 0 ? 'start' : i === pts.length - 1 ? 'end' : 'middle'}">${String(pts[i][0]).slice(0, 7)}</text>`);
-    let body;
-    if (bars) { const w = Math.max(2, (W - L - R) / pts.length - 3);
-      body = pts.map((p, i) => `<rect x="${x(i) - w/2}" y="${y(p[1])}" width="${w}" height="${y(lo) - y(p[1])}" rx="2" fill="var(--accent)"><title>${day(p[0])}: ${fmt(p[1])}</title></rect>`).join('');
-    } else {
-      const dpath = pts.map((p, i) => (i ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p[1]).toFixed(1)).join(' ');
-      body = `<path d="${dpath}" fill="none" stroke="var(--accent)" stroke-width="2"/>` +
-        pts.map((p, i) => `<circle cx="${x(i)}" cy="${y(p[1])}" r="6" fill="transparent"><title>${day(p[0])}: ${fmt(Math.round(p[1]*100)/100)}</title></circle>`).join('');
-    }
-    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img">${g}${body}</svg>`;
+      g += `<line x1="${L}" x2="${W-R}" y1="${yy}" y2="${yy}" stroke="var(--line)"/><text x="${L-6}" y="${yy+4}" text-anchor="end">${v.toFixed(1)}%</text>`; }
+    g += `<line x1="${L}" x2="${W-R}" y1="${y(0)}" y2="${y(0)}" stroke="var(--muted)" stroke-dasharray="3 3"/>`;
+    [0, Math.floor(pts.length / 2), pts.length - 1].forEach((i) => g += `<text x="${x(i)}" y="${H-6}" text-anchor="${i === 0 ? 'start' : i === pts.length - 1 ? 'end' : 'middle'}">${nice(pts[i][0])}</text>`);
+    const path = (j) => { let s = '', pen = false; pts.forEach((p, i) => { if (p[j] == null) { pen = false; return; } s += (pen ? 'L' : 'M') + x(i).toFixed(1) + ' ' + y(p[j]).toFixed(1) + ' '; pen = true; }); return s; };
+    const hits = pts.map((p, i) => `<circle cx="${x(i)}" cy="${y(p[1])}" r="7" fill="transparent"><title>${nice(p[0])}: bot ${p[1].toFixed(2)}%${p[2] != null ? ', S&P ' + p[2].toFixed(2) + '%' : ''}</title></circle>`).join('');
+    el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Account versus S&P 500">${g}` +
+      `<path d="${path(2)}" fill="none" stroke="var(--muted)" stroke-width="1.5"/><path d="${path(1)}" fill="none" stroke="var(--accent)" stroke-width="2.25"/>${hits}</svg>`;
   }
 })();
 </script>
