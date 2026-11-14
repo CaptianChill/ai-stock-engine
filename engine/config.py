@@ -40,6 +40,10 @@ class MomentumParams:
     max_corr_neighbors: int = 0          # skip a name that is highly correlated with this many picks
     corr_threshold: float = 0.7          # daily-return correlation counted as "moves together"
     corr_window: int = 63                # trading days of returns used (about 3 months)
+    # Market trend filter (v1.3.0+): on a rebalance day, if the trend symbol closed below its
+    # N-day average, hold cash instead of stocks until the next rebalance. 0 = off.
+    trend_filter_days: int = 0
+    trend_symbol: str = "SPY"
 
 
 @dataclass(frozen=True)
@@ -100,9 +104,15 @@ class StrategyVersion:
 V1_0_0 = StrategyVersion(version="v1.0.0")
 V1_1_0 = StrategyVersion(version="v1.1.0", news_weight=0.0, momentum_weight=1.0,
                          momentum=MomentumParams(llm_veto=False))
-ACTIVE_VERSION = StrategyVersion(version="v1.2.0", news_weight=0.0, momentum_weight=1.0,
-                                 momentum=MomentumParams(llm_veto=False, max_corr_neighbors=2))
-BUILTIN_VERSIONS = {v.version: v for v in (V1_0_0, V1_1_0, ACTIVE_VERSION)}
+# v1.3.0 (2026-11-14): v1.2.0 plus the market trend filter (Faber's 200-day rule / the
+# "absolute momentum" half of dual momentum): stocks only while SPY is above its 200-day average.
+# It targets momentum's known weak spot, crashes that start when the whole market turns down.
+V1_2_0 = StrategyVersion(version="v1.2.0", news_weight=0.0, momentum_weight=1.0,
+                         momentum=MomentumParams(llm_veto=False, max_corr_neighbors=2))
+ACTIVE_VERSION = StrategyVersion(version="v1.3.0", news_weight=0.0, momentum_weight=1.0,
+                                 momentum=MomentumParams(llm_veto=False, max_corr_neighbors=2,
+                                                         trend_filter_days=200))
+BUILTIN_VERSIONS = {v.version: v for v in (V1_0_0, V1_1_0, V1_2_0, ACTIVE_VERSION)}
 
 
 def uses_llm(sv: StrategyVersion) -> bool:

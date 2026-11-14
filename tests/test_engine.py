@@ -289,3 +289,60 @@ def test_versions_without_cap_are_unchanged():
     for k in ("max_corr_neighbors", "corr_threshold", "corr_window"):
         old["momentum"].pop(k)          # what v1.1.0 looks like when stored before this change
     assert StrategyVersion.from_json(old) == V1_1_0
+
+
+# -- v1.3.0 market trend filter ----------------------------------------------------------------
+def _with_index(close, trend):
+    out = close.copy()
+    n = len(out)
+    out["SPY"] = 100 * np.cumprod(np.full(n, 1 + trend))
+    return out
+
+
+def test_trend_filter_holds_cash_when_market_is_below_its_average():
+    from dataclasses import replace
+    p = replace(make_version().momentum, top_n=5, lookback_days=120, skip_days=10, llm_veto=False,
+                trend_filter_days=200)
+    up, down = _with_index(_clustered_close(), 0.001), _with_index(_clustered_close(), -0.001)
+    elig = set(up.columns) - {"SPY"}
+    assert st.market_trend(up, len(up), p)["risk_on"] is True
+    assert len(st.rank_momentum(up, len(up), elig, set(), None, p)) == 5
+    t = st.market_trend(down, len(down), p)
+    assert t["risk_on"] is False and t["gap_pct"] < 0
+    assert st.rank_momentum(down, len(down), elig, set(), None, p) == []
+
+
+def test_trend_filter_off_or_missing_history_never_blocks():
+    from dataclasses import replace
+    base = replace(make_version().momentum, top_n=5, lookback_days=120, skip_days=10, llm_veto=False)
+    down = _with_index(_clustered_close(), -0.001)
+    elig = set(down.columns) - {"SPY"}
+    assert st.market_trend(down, len(down), base) is None                       # filter off
+    no_spy = down.drop(columns="SPY")
+    assert st.market_trend(no_spy, len(no_spy), replace(base, trend_filter_days=200)) is None
+    assert len(st.rank_momentum(no_spy, len(no_spy), elig, set(), None, replace(base, trend_filter_days=200))) == 5
+
+
+def test_trend_filter_uses_only_past_closes():
+    from dataclasses import replace
+    p = replace(make_version().momentum, trend_filter_days=50)
+    c = _with_index(_clustered_close(), 0.001)
+    i = 200
+    a = st.market_trend(c, i, p)
+    c2 = c.copy(); c2.iloc[i:, c2.columns.get_loc("SPY")] = 1.0
+    assert st.market_trend(c2, i, p) == a
+
+
+def test_replay_goes_to_cash_in_a_falling_market():
+    from dataclasses import replace
+    bars, scores, days = make_market(n_days=420, trend_symbols=5, edge=0.0, seed=5)
+    spy = pd.DataFrame({"symbol": "SPY", "day": days, "open": 0.0, "high": 0.0, "low": 0.0,
+                        "close": 100 * np.cumprod(np.full(len(days), 0.998)), "volume": 1e9})
+    spy["open"] = spy["high"] = spy["low"] = spy["close"]
+    b2 = pd.concat([bars, spy], ignore_index=True)
+    sv = make_version(news_weight=0.0, momentum_weight=1.0)
+    sv = replace(sv, momentum=replace(sv.momentum, llm_veto=False))
+    on = run_replay(b2, scores, sv)
+    off = run_replay(b2, scores, replace(sv, momentum=replace(sv.momentum, trend_filter_days=100)))
+    assert float(on.daily.abs().sum()) > 0          # invested without the filter
+    assert float(off.daily.abs().sum()) == 0.0      # all cash with it: the market only fell

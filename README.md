@@ -3,7 +3,14 @@
 An LLM reads company news; rules decide what trades. Two engines, one risk agent with the final
 say, and audit gates that keep it on paper until the evidence is in.
 
-**Active version: v1.2.0 (since 2026-11-14): momentum only, with a concentration cap.**
+**Active version: v1.3.0 (since 2026-11-14): v1.2.0 plus a market trend filter.**
+On each monthly rebalance, if SPY closed below its 200-day average the engine holds cash for the
+month instead of stocks (Faber's 200-day rule, the "absolute momentum" half of dual momentum). It
+targets momentum's known failure, the crashes that begin when the whole market turns down. The
+filter uses closes before the trading day only, and the same code runs in replay and live.
+The close stage also saves a holdings snapshot (prices, P&L) for the Mission Control dashboard.
+
+**v1.2.0 (2026-11-14): momentum only, with a concentration cap.**
 v1.1.0's first rebalance (2026-11-13) bought 7 memory/semiconductor stocks plus 2x and 3x chip ETFs:
 one sector bet. v1.2.0 keeps the same ranking but skips a name that moves with 2 or more names already
 picked (63-day daily-return correlation above 0.7). Switching versions re-picks on the next premarket
@@ -151,7 +158,10 @@ python -m pytest -q
 
 ## Mission Control website (dashboard/)
 
-A PIN-protected, read-only status page you can open on any phone or computer, hosted free on Vercel.
+A PIN-protected, read-only page you can open on any phone or computer, hosted free on Vercel:
+account value, today's and total gain vs the S&P 500, every stock held (price, P&L, why it was
+picked), recent orders, the market-trend switch, safety stops, whether the PC is running, and the
+live-money checklist.
 It reads the database through the `dash_ro` login, which can only read (writes are refused).
 Vercel project settings → Environment Variables:
 - `DATABASE_URL`: the `dash_ro` connection string (pooler host)
