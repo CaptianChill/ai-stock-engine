@@ -346,3 +346,57 @@ def test_replay_goes_to_cash_in_a_falling_market():
     off = run_replay(b2, scores, replace(sv, momentum=replace(sv.momentum, trend_filter_days=100)))
     assert float(on.daily.abs().sum()) > 0          # invested without the filter
     assert float(off.daily.abs().sum()) == 0.0      # all cash with it: the market only fell
+
+
+# -- v1.4.0 volatility sizing ------------------------------------------------------------------
+def _vol_close(n=200, seed=4):
+    rng = np.random.default_rng(seed)
+    cols = {"CALM": 50 * np.cumprod(1 + rng.normal(0.001, 0.005, n)),
+            "MID": 50 * np.cumprod(1 + rng.normal(0.001, 0.015, n)),
+            "WILD": 50 * np.cumprod(1 + rng.normal(0.001, 0.045, n))}
+    return pd.DataFrame(cols, index=list(pd.bdate_range("2025-01-01", periods=n).date))
+
+
+def test_vol_weighting_gives_calmer_stocks_bigger_positions():
+    from dataclasses import replace
+    c = _vol_close()
+    p = replace(make_version().momentum, top_n=3, vol_weighting=True)
+    w = st.position_weights(c, len(c), ["CALM", "MID", "WILD"], p, max_weight=1.0)
+    assert w["CALM"] > w["MID"] > w["WILD"]
+    assert abs(sum(w.values()) - 1.0) < 1e-9
+
+
+def test_vol_weights_respect_the_per_stock_cap_and_keep_the_rest_in_cash():
+    from dataclasses import replace
+    c = _vol_close()
+    p = replace(make_version().momentum, top_n=3, vol_weighting=True)
+    w = st.position_weights(c, len(c), ["CALM", "MID", "WILD"], p, max_weight=0.4)
+    assert max(w.values()) <= 0.4 + 1e-12 and sum(w.values()) < 1.0
+
+
+def test_equal_weight_is_unchanged_when_vol_weighting_is_off():
+    c = _vol_close()
+    p = make_version().momentum                  # top_n=5, vol_weighting off
+    w = st.position_weights(c, len(c), ["CALM", "MID", "WILD"], p, max_weight=0.1)
+    assert w == {"CALM": 0.2, "MID": 0.2, "WILD": 0.2}
+
+
+def test_vol_weights_use_only_past_closes():
+    from dataclasses import replace
+    c = _vol_close()
+    p = replace(make_version().momentum, top_n=3, vol_weighting=True)
+    i = 150
+    a = st.position_weights(c, i, ["CALM", "MID", "WILD"], p, 1.0)
+    c2 = c.copy(); c2.iloc[i:] = c2.iloc[i:] * 3
+    assert st.position_weights(c2, i, ["CALM", "MID", "WILD"], p, 1.0) == a
+
+
+def test_replay_with_vol_weighting_runs_and_differs_from_equal_weight():
+    from dataclasses import replace
+    bars, scores, days = make_market(n_days=420, trend_symbols=5, edge=0.0, seed=5)
+    sv = make_version(news_weight=0.0, momentum_weight=1.0)
+    sv = replace(sv, momentum=replace(sv.momentum, llm_veto=False))
+    eq = run_replay(bars, scores, sv)
+    vw = run_replay(bars, scores, replace(sv, momentum=replace(sv.momentum, vol_weighting=True)))
+    assert float((eq.daily - vw.daily).abs().sum()) > 0
+    assert all(0 < t["weight"] <= 0.5 for t in vw.trades if t["engine"] == "momentum")

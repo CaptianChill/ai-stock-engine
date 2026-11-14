@@ -204,6 +204,8 @@ class Runner:
             trend = st.market_trend(close, len(close), sv.momentum)
             risk_off = bool(trend) and not trend["risk_on"]
             scores = st.momentum_scores(close, len(close), targets, sv.momentum)
+            max_w = sv.risk.max_position_pct / sv.momentum_weight if sv.momentum_weight > 0 else 1.0
+            weights = st.position_weights(close, len(close), targets, sv.momentum, max_w)
             current = {p["symbol"]: p for p in self.db.open_positions(self.mode, "momentum")}
             for sym, p in current.items():
                 if sym not in targets:
@@ -219,7 +221,8 @@ class Runner:
             prices.update(self.dc.latest_prices(new) if new else {})
             for sym in new:
                 it = rk.OrderIntent("momentum", sym, "buy", prices.get(sym, 0),
-                                    target_notional=rk.momentum_slot_notional(equity, sv))
+                                    target_notional=rk.momentum_slot_notional(equity, sv, weights.get(sym)),
+                                    reason={"weight": weights.get(sym), "momentum_12_1": scores.get(sym)})
                 v = rk.check(it, equity=equity, gross_exposure=gross, kill_switch_engaged=ks,
                              entries_halted=halted, held_symbols=held, p=sv.risk)
                 self._submit(today, it, v, "opg", {"exit_due": None})
@@ -234,7 +237,8 @@ class Runner:
             if (targets or risk_off) and not ks and not halted:
                 self.db.mark_stage(month_first, "momentum_rebalanced", "done",
                                    {"ran_on": str(today), "targets": targets, "version": sv.version,
-                                    "scores": scores, "trend": trend, "risk_off": risk_off})
+                                    "scores": scores, "weights": weights, "trend": trend,
+                                    "risk_off": risk_off})
 
         for _, r in picks.iterrows():
             sym = r["symbol"]

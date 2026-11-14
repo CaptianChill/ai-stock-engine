@@ -3,7 +3,12 @@
 An LLM reads company news; rules decide what trades. Two engines, one risk agent with the final
 say, and audit gates that keep it on paper until the evidence is in.
 
-**Active version: v1.3.0 (since 2026-11-14): v1.2.0 plus a market trend filter.**
+**Active version: v1.4.0 (since 2026-11-14): v1.3.0 plus volatility sizing.**
+Each pick's dollars are proportional to 1 / its 63-day daily volatility instead of equal dollars
+(capped at the 10% per-stock limit; anything capped off stays in cash). Same weights in replay and
+live; a stock keeps its entry size until it is sold.
+
+**v1.3.0 (2026-11-14): v1.2.0 plus a market trend filter.**
 On each monthly rebalance, if SPY closed below its 200-day average the engine holds cash for the
 month instead of stocks (Faber's 200-day rule, the "absolute momentum" half of dual momentum). It
 targets momentum's known failure, the crashes that begin when the whole market turns down. The

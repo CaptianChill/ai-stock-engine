@@ -31,8 +31,10 @@ def news_slot_notional(equity: float, sv: StrategyVersion) -> float:
     return min(slot, equity * sv.risk.max_position_pct)
 
 
-def momentum_slot_notional(equity: float, sv: StrategyVersion) -> float:
-    slot = equity * sv.momentum_weight / sv.momentum.top_n
+def momentum_slot_notional(equity: float, sv: StrategyVersion, weight: float | None = None) -> float:
+    """weight: this stock's share of the momentum sleeve (from strategies.position_weights);
+    None = the equal-weight slot."""
+    slot = equity * sv.momentum_weight * (weight if weight is not None else 1.0 / sv.momentum.top_n)
     return min(slot, equity * sv.risk.max_position_pct)
 
 
