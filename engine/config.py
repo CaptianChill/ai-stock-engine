@@ -44,6 +44,10 @@ class MomentumParams:
     # N-day average, hold cash instead of stocks until the next rebalance. 0 = off.
     trend_filter_days: int = 0
     trend_symbol: str = "SPY"
+    # Volatility sizing (v1.4.0+): size each pick by 1 / its recent daily volatility instead of
+    # equal dollars, so a wild stock gets a smaller position. False = equal weight.
+    vol_weighting: bool = False
+    vol_window: int = 63                 # trading days of daily returns (about 3 months)
 
 
 @dataclass(frozen=True)
@@ -109,10 +113,16 @@ V1_1_0 = StrategyVersion(version="v1.1.0", news_weight=0.0, momentum_weight=1.0,
 # It targets momentum's known weak spot, crashes that start when the whole market turns down.
 V1_2_0 = StrategyVersion(version="v1.2.0", news_weight=0.0, momentum_weight=1.0,
                          momentum=MomentumParams(llm_veto=False, max_corr_neighbors=2))
-ACTIVE_VERSION = StrategyVersion(version="v1.3.0", news_weight=0.0, momentum_weight=1.0,
+V1_3_0 = StrategyVersion(version="v1.3.0", news_weight=0.0, momentum_weight=1.0,
+                         momentum=MomentumParams(llm_veto=False, max_corr_neighbors=2,
+                                                 trend_filter_days=200))
+# v1.4.0 (2026-11-14): v1.3.0 with inverse-volatility position sizing: each pick's dollars are
+# proportional to 1 / its 63-day daily volatility (capped by the 10% per-stock limit; any
+# leftover stays in cash). Calmer winners get more, the wildest get less.
+ACTIVE_VERSION = StrategyVersion(version="v1.4.0", news_weight=0.0, momentum_weight=1.0,
                                  momentum=MomentumParams(llm_veto=False, max_corr_neighbors=2,
-                                                         trend_filter_days=200))
-BUILTIN_VERSIONS = {v.version: v for v in (V1_0_0, V1_1_0, V1_2_0, ACTIVE_VERSION)}
+                                                         trend_filter_days=200, vol_weighting=True))
+BUILTIN_VERSIONS = {v.version: v for v in (V1_0_0, V1_1_0, V1_2_0, V1_3_0, ACTIVE_VERSION)}
 
 
 def uses_llm(sv: StrategyVersion) -> bool:

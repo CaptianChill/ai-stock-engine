@@ -93,8 +93,11 @@ def _momentum_engine(bars, signals, eligible, sv: StrategyVersion, cost_bps: flo
     daily = pd.Series(0.0, index=days)
     trades = []
     held: dict[str, dict] = {}
-    w = 1.0 / p.top_n
     reb = set(targets)
+    pos = {d: i for i, d in enumerate(days)}
+    # Same weights the live runner buys with; a stock keeps its entry weight until it is sold.
+    max_w = sv.risk.max_position_pct / sv.momentum_weight if sv.momentum_weight > 0 else 1.0
+    weights = {d: st.position_weights(closes, pos[d], targets[d], p, max_w) for d in reb}
     for i, d in enumerate(days):
         if d in reb:
             new = set(targets[d])
@@ -103,8 +106,9 @@ def _momentum_engine(bars, signals, eligible, sv: StrategyVersion, cost_bps: flo
                 if sym not in new:
                     po, pc = opens.at[d, sym], closes[sym].iloc[i - 1]
                     leg = (po / pc - 1) if np.isfinite(po) and np.isfinite(pc) and pc > 0 else 0.0
-                    daily.iloc[i] += w * (leg - c)
                     h = held.pop(sym)
+                    w = h["w"]
+                    daily.iloc[i] += w * (leg - c)
                     exit_px = po if np.isfinite(po) else pc
                     gross = exit_px / h["entry_px"] - 1
                     trades.append({"engine": "momentum", "symbol": sym, "entry_day": h["entry_day"],
@@ -114,19 +118,20 @@ def _momentum_engine(bars, signals, eligible, sv: StrategyVersion, cost_bps: flo
             for sym in held:
                 pc, cc = closes[sym].iloc[i - 1], closes.at[d, sym]
                 if np.isfinite(pc) and np.isfinite(cc) and pc > 0:
-                    daily.iloc[i] += w * (cc / pc - 1)
+                    daily.iloc[i] += held[sym]["w"] * (cc / pc - 1)
             # New names: open -> close, entry cost.
             for sym in new - set(held):
                 po, cc = opens.at[d, sym], closes.at[d, sym]
                 if not (np.isfinite(po) and np.isfinite(cc) and po > 0):
                     continue
+                w = weights[d].get(sym, 0.0)
                 daily.iloc[i] += w * (cc / po - 1 - c)
-                held[sym] = {"entry_day": d, "entry_px": float(po)}
+                held[sym] = {"entry_day": d, "entry_px": float(po), "w": w}
             continue
         for sym in held:
             pc, cc = closes[sym].iloc[i - 1], closes.at[d, sym]
             if np.isfinite(pc) and np.isfinite(cc) and pc > 0:
-                daily.iloc[i] += w * (cc / pc - 1)
+                daily.iloc[i] += held[sym]["w"] * (cc / pc - 1)
     return daily, trades
 
 

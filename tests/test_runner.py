@@ -334,7 +334,8 @@ def test_version_with_llm_still_waits_for_overnight_news():
 
 def test_active_version_is_momentum_only_and_llm_free():
     from engine.config import ACTIVE_VERSION, StrategyVersion, uses_llm
-    assert ACTIVE_VERSION.version == "v1.3.0" and not uses_llm(ACTIVE_VERSION)
+    assert ACTIVE_VERSION.version == "v1.4.0" and not uses_llm(ACTIVE_VERSION)
+    assert ACTIVE_VERSION.momentum.vol_weighting is True
     assert ACTIVE_VERSION.momentum.trend_filter_days == 200
     assert ACTIVE_VERSION.momentum.max_corr_neighbors == 2
     assert ACTIVE_VERSION.news_weight == 0 and ACTIVE_VERSION.momentum_weight == 1
@@ -402,3 +403,16 @@ def test_close_saves_a_holdings_snapshot_for_the_dashboard():
     r.tick(at(m1, 9, 0)); br.fill_all(); r.tick(at(m1, 16, 45))
     h = db.get_stage(m1, "holdings")["detail"]
     assert len(h["positions"]) == r.sv.momentum.top_n and h["equity"] > 0
+
+
+def test_vol_weighted_rebalance_buys_different_dollar_amounts():
+    from dataclasses import replace
+    r, db, br, days, firsts = _momentum_runner(llm_veto=False)
+    r.sv = replace(r.sv, momentum=replace(r.sv.momentum, vol_weighting=True),
+                   risk=replace(r.sv.risk, max_position_pct=0.5))
+    m1 = firsts[0]
+    br.today = m1
+    out = r.tick(at(m1, 9, 0))
+    assert out["orders_submitted"] == r.sv.momentum.top_n
+    w = db.get_stage(m1, "momentum_rebalanced")["detail"]["weights"]
+    assert len(w) == r.sv.momentum.top_n and len({round(v, 6) for v in w.values()}) > 1

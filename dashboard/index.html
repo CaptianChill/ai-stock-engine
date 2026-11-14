@@ -268,7 +268,8 @@
     $('holdnote').textContent = d.holdings ? `Prices from the close on ${nice(d.holdings.trade_day)}. Picked on ${reb.ran_on ? nice(reb.ran_on) : '—'}${reb.risk_off ? ' — market trend was down, so the bot chose cash.' : '.'}` : 'Prices appear after the bot\'s next market-close run.';
     $('holdings').innerHTML = rows.length ? rows.map((p) => {
       const w = acct && num(p.market_value) ? p.market_value / acct : null;
-      const why = scores[p.symbol] != null ? `Up ${(scores[p.symbol] * 100).toFixed(0)}% over the past year` : '<span class="d">bought by an earlier version</span>';
+      const tw = (reb.weights || {})[p.symbol];
+      const why = scores[p.symbol] != null ? `Up ${(scores[p.symbol] * 100).toFixed(0)}% over the past year` + (tw != null ? ` <span class="d">· target ${(tw * 100).toFixed(1)}%</span>` : '') : '<span class="d">bought by an earlier version</span>';
       const cp = num(p.lastday_price) && num(p.current_price) ? p.current_price / p.lastday_price - 1 : num(p.change_today);
       return `<tr><td><b>${esc(p.symbol)}</b></td><td>${fmt(p.qty)}</td><td>${usd(p.avg_entry_price, 2)}</td><td>${usd(p.current_price, 2)}</td><td>${usd(p.market_value)}</td>` +
         `<td class="${cls(p.unrealized_pl)}">${sgnUsd(p.unrealized_pl)} <span class="d">${pct(num(p.unrealized_plpc))}</span></td>` +
@@ -294,7 +295,8 @@
     const rules = [
       'Looks at the ~500 most-traded U.S. stocks over $5.',
       'Ranks them by how much they rose over the past 12 months, skipping the most recent month (the classic "12-1 momentum" signal).',
-      'Buys the top 15, about equal dollars each, on the first trading day of each month. Holds them until the next month.',
+      'Buys the top 15 on the first trading day of each month and holds them until the next month.',
+      'Sizes each stock by how calm it has been over the last 3 months: steadier stocks get more dollars, the wildest get less (never more than 10% in one stock).',
       'Skips a stock that moves in lockstep with 2 or more stocks already picked, so it can\'t pile into one sector.',
       'Market trend filter: if the S&P 500 is below its 200-day average on rebalance day, it holds cash for the month instead.',
       'Never borrows money, never shorts, and no stock can be more than 10% of the account.',

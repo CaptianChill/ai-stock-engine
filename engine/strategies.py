@@ -152,6 +152,33 @@ def momentum_scores(close: pd.DataFrame, i: int, symbols: list[str], p: Momentum
             if s in close.columns and np.isfinite(recent[s]) and np.isfinite(past[s]) and past[s] > 0}
 
 
+def position_weights(close: pd.DataFrame, i: int, targets: list[str], p: MomentumParams,
+                     max_weight: float) -> dict[str, float]:
+    """Fraction of the momentum sleeve for each target on the day at position i (closes before i
+    only). Equal weight unless vol_weighting; then proportional to 1 / daily volatility over
+    vol_window days. Each weight is capped at max_weight; capped-off weight stays in cash."""
+    if not targets:
+        return {}
+    equal = {s: 1.0 / p.top_n for s in targets}   # exactly what v1.3.0 and earlier used
+    if not p.vol_weighting:
+        return equal
+    window = close.iloc[max(0, i - 1 - p.vol_window): i]
+    cols = [s for s in targets if s in window.columns]
+    vol = window[cols].pct_change().iloc[1:].std(ddof=1) if len(window) > 2 else pd.Series(dtype=float)
+    inv = {}
+    for s in targets:
+        v = float(vol.get(s, np.nan)) if len(vol) else np.nan
+        inv[s] = 1.0 / v if np.isfinite(v) and v > 0 else np.nan
+    known = [x for x in inv.values() if np.isfinite(x)]
+    if not known:
+        return equal
+    fill = float(np.median(known))       # a name without enough history gets a middling size
+    inv = {s: (x if np.isfinite(x) else fill) for s, x in inv.items()}
+    tot = sum(inv.values())
+    sleeve = len(targets) / p.top_n     # fewer picks than top_n leaves the rest in cash, as before
+    return {s: min(sleeve * x / tot, max_weight) for s, x in inv.items()}
+
+
 def _diversify(window: pd.DataFrame, ranked: list[str], p: MomentumParams) -> list[str]:
     """Walk the momentum ranking and skip a name that moves with too many names already picked
     (daily-return correlation above corr_threshold with max_corr_neighbors or more of them).
