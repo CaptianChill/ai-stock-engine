@@ -48,6 +48,12 @@ class MomentumParams:
     # equal dollars, so a wild stock gets a smaller position. False = equal weight.
     vol_weighting: bool = False
     vol_window: int = 63                 # trading days of daily returns (about 3 months)
+    # Machine-learning ranking (v1.5.0-ml+): instead of sorting by the 12-1 return alone, a
+    # scikit-learn model scores each stock from a few price features, trained walk-forward on
+    # past rebalances whose results were fully known before the trading day. False = plain 12-1.
+    ml_rank: bool = False
+    ml_train_rebalances: int = 36        # past monthly rebalances the model learns from (3 years)
+    ml_min_rebalances: int = 24          # fewer labelled months than this: fall back to plain 12-1
 
 
 @dataclass(frozen=True)
@@ -122,7 +128,17 @@ V1_3_0 = StrategyVersion(version="v1.3.0", news_weight=0.0, momentum_weight=1.0,
 ACTIVE_VERSION = StrategyVersion(version="v1.4.0", news_weight=0.0, momentum_weight=1.0,
                                  momentum=MomentumParams(llm_veto=False, max_corr_neighbors=2,
                                                          trend_filter_days=200, vol_weighting=True))
-BUILTIN_VERSIONS = {v.version: v for v in (V1_0_0, V1_1_0, V1_2_0, V1_3_0, ACTIVE_VERSION)}
+# v1.5.0-ml (2026-11-16, CANDIDATE, not active): v1.4.0 with the 12-1 ranking replaced by a
+# scikit-learn model (gradient-boosted trees) that scores each stock from 12-1 momentum, 6-1
+# momentum, last month's return, 63-day volatility and distance from the 200-day average. It is
+# retrained on every rebalance using only the past 36 months whose outcomes were already known, so
+# replay and live see the same picks. Trend filter, correlation cap and vol sizing are unchanged.
+# It trades only after its own research replay passes every gate and ACTIVE_VERSION is switched.
+V1_5_0_ML = StrategyVersion(version="v1.5.0-ml", news_weight=0.0, momentum_weight=1.0,
+                            momentum=MomentumParams(llm_veto=False, max_corr_neighbors=2,
+                                                    trend_filter_days=200, vol_weighting=True,
+                                                    ml_rank=True))
+BUILTIN_VERSIONS = {v.version: v for v in (V1_0_0, V1_1_0, V1_2_0, V1_3_0, ACTIVE_VERSION, V1_5_0_ML)}
 
 
 def uses_llm(sv: StrategyVersion) -> bool:

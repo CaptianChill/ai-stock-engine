@@ -10,5 +10,10 @@ set GIT_HTTP_LOW_SPEED_TIME=30
 echo ===== %date% %time% >> logs\tick.log
 rem Pick up fixes pushed to GitHub without anyone having to touch this PC (fast-forward only).
 git pull --ff-only -q >> logs\tick.log 2>&1
+rem One time only, on PCs set up before hidden.vbs existed: stop the tasks opening a black window.
+if not exist logs\hidden-tasks.done (
+  powershell -NoProfile -ExecutionPolicy Bypass -File windows\hide-tasks.ps1 >> logs\tick.log 2>&1
+  echo done> logs\hidden-tasks.done
+)
 .venv\Scripts\python.exe -m engine tick >> logs\tick.log 2>&1
 echo ----- finished %time% (exit %errorlevel%) >> logs\tick.log
