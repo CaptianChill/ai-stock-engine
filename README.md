@@ -11,7 +11,10 @@ rebalance from the last 36 months whose results were already known before the tr
 replay and the live runner pick the same names. With fewer than 24 known months it falls back to plain
 12-1. Trend filter, correlation cap and vol sizing are unchanged. To judge it:
 `python -m engine replay 2017-03-01 <last trading day> --version v1.5.0-ml`, then `audit` the run.
-It trades only if every gate passes and you switch `ACTIVE_VERSION` to it. Trying it counts as one
+It trades only if every gate passes and you switch `ACTIVE_VERSION` to it. One step for all of it: double-click
+`windows\backtest.cmd` (or `python -m engine compare`), which trades v1.4.0 and v1.5.0-ml over every
+day since March 2017 as if live, audits both, and prints (and sends to your phone) a scoreboard next
+to simply holding SPY. Trying it counts as one
 more version for the overfitting gate.
 
 **Active version: v1.4.0 (since 2026-11-14): v1.3.0 plus volatility sizing.**
