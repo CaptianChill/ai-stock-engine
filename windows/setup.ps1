@@ -92,13 +92,19 @@ $days = "Monday","Tuesday","Wednesday","Thursday","Friday"
 $tick = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $days -At 6:30am
 $tick.Repetition = (New-ScheduledTaskTrigger -Once -At 6:30am `
     -RepetitionInterval (New-TimeSpan -Minutes 10) -RepetitionDuration (New-TimeSpan -Hours 11)).Repetition
-$tickAction = New-ScheduledTaskAction -Execute (Join-Path $Root "windows\tick.cmd") -WorkingDirectory $Root
+# Started through hidden.vbs so no black terminal window pops up each time a task runs.
+$vbs = Join-Path $Root "windows\hidden.vbs"
+$tickAction = New-ScheduledTaskAction -Execute "wscript.exe" `
+    -Argument ("//B //Nologo `"{0}`" `"{1}`"" -f $vbs, (Join-Path $Root "windows\tick.cmd")) -WorkingDirectory $Root
 Register-ScheduledTask -TaskName "AI Stock Engine - Trader" -Trigger $tick -Action $tickAction `
     -Settings $settings -Description "Paper trading tick every 10 minutes on weekdays" -Force | Out-Null
+New-Item -ItemType Directory -Force (Join-Path $Root "logs") | Out-Null
+Set-Content (Join-Path $Root "logs\hidden-tasks.done") "done"
 
 # Review brain: weekdays 6:15 PM local (after the 4:30 PM New York close stage).
 $brain = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $days -At 6:15pm
-$brainAction = New-ScheduledTaskAction -Execute (Join-Path $Root "windows\brain.cmd") -WorkingDirectory $Root
+$brainAction = New-ScheduledTaskAction -Execute "wscript.exe" `
+    -Argument ("//B //Nologo `"{0}`" `"{1}`"" -f $vbs, (Join-Path $Root "windows\brain.cmd")) -WorkingDirectory $Root
 Register-ScheduledTask -TaskName "AI Stock Engine - Brain" -Trigger $brain -Action $brainAction `
     -Settings $settings -Description "Nightly review brain" -Force | Out-Null
 

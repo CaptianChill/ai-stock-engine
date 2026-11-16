@@ -119,6 +119,10 @@ def rank_momentum(close: pd.DataFrame, i: int, eligible: set[str], veto_days: se
     past = close.iloc[i - 1 - p.lookback_days]
     mom = (recent / past - 1).dropna()
     mom = mom[[s in eligible for s in mom.index]].sort_values(ascending=False)
+    if p.ml_rank:
+        scored = ml_scores(close, i, list(mom.index), p)
+        if scored is not None:           # None = not enough labelled history yet: keep plain 12-1
+            mom = scored.sort_values(ascending=False)
     vetoed: set[str] = set()
     if p.llm_veto and signals is not None and not signals.empty:
         recent_news = signals[signals["trade_day"].isin(veto_days)]
@@ -177,6 +181,73 @@ def position_weights(close: pd.DataFrame, i: int, targets: list[str], p: Momentu
     tot = sum(inv.values())
     sleeve = len(targets) / p.top_n     # fewer picks than top_n leaves the rest in cash, as before
     return {s: min(sleeve * x / tot, max_weight) for s, x in inv.items()}
+
+
+# -- machine-learning ranking (v1.5.0-ml) ------------------------------------------------
+ML_FEATURES = ["mom_12_1", "mom_6_1", "ret_1m", "vol_63", "dist_200"]
+
+
+def ml_features(close: pd.DataFrame, j: int, p: MomentumParams) -> pd.DataFrame | None:
+    """Features for every symbol on the day at position j, from closes strictly before j.
+    Each feature is turned into a 0-1 percentile across that day's stocks, so the model learns
+    'stronger than the others' rather than raw levels that drift between calm and wild years."""
+    need = max(p.lookback_days, 200, 64)
+    if j - 1 - need < 0:
+        return None
+    last = close.iloc[j - 1]
+    f = pd.DataFrame({
+        "mom_12_1": close.iloc[j - 1 - p.skip_days] / close.iloc[j - 1 - p.lookback_days] - 1,
+        "mom_6_1": close.iloc[j - 1 - p.skip_days] / close.iloc[j - 1 - 126] - 1,
+        "ret_1m": last / close.iloc[j - 1 - p.skip_days] - 1,
+        "vol_63": close.iloc[j - 64: j].pct_change().iloc[1:].std(ddof=1),
+        "dist_200": last / close.iloc[j - 200: j].mean() - 1,
+    }).replace([np.inf, -np.inf], np.nan).dropna()
+    if f.empty:
+        return None
+    return f.rank(pct=True)
+
+
+def ml_scores(close: pd.DataFrame, i: int, symbols: list[str], p: MomentumParams) -> pd.Series | None:
+    """Model score for each candidate on the day at position i. Trains on past rebalance days j
+    whose label, the return from close[j-1] to close[next rebalance - 1], is fully known before
+    day i (next rebalance <= i, so every close used is at a position <= i-1). Returns None when
+    fewer than ml_min_rebalances such months exist, so the caller keeps the plain 12-1 order."""
+    if not symbols:
+        return None
+    reb = sorted(k for k in _rebalance_positions(close) if k < i)
+    # (start, end) of each past holding month; the newest one ends at today (position i).
+    months = list(zip(reb, reb[1:] + [i]))[-p.ml_train_rebalances:]
+    rows, labels = [], []
+    for a, b in months:
+        f = ml_features(close, a, p)
+        if f is None:
+            continue
+        fwd = (close.iloc[b - 1] / close.iloc[a - 1] - 1).reindex(f.index)
+        ok = fwd.notna() & np.isfinite(fwd)
+        if ok.sum() < 5:
+            continue
+        rows.append(f[ok])
+        labels.append(fwd[ok].rank(pct=True))   # learn the month's order, not its market move
+    if len(rows) < p.ml_min_rebalances:
+        return None
+    now = ml_features(close, i, p)
+    if now is None:
+        return None
+    now = now.reindex([s for s in symbols if s in now.index])
+    if now.empty:
+        return None
+    from sklearn.ensemble import HistGradientBoostingRegressor   # imported only for ML versions
+    model = HistGradientBoostingRegressor(max_depth=3, max_iter=150, learning_rate=0.05,
+                                          min_samples_leaf=50, early_stopping=False, random_state=0)
+    X = pd.concat(rows)[ML_FEATURES].to_numpy()
+    y = pd.concat(labels).to_numpy()
+    model.fit(X, y)
+    return pd.Series(model.predict(now[ML_FEATURES].to_numpy()), index=now.index)
+
+
+def _rebalance_positions(close: pd.DataFrame) -> set[int]:
+    pos = {d: k for k, d in enumerate(close.index)}
+    return {pos[d] for d in rebalance_days(list(close.index))}
 
 
 def _diversify(window: pd.DataFrame, ranked: list[str], p: MomentumParams) -> list[str]:

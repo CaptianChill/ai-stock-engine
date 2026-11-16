@@ -400,3 +400,82 @@ def test_replay_with_vol_weighting_runs_and_differs_from_equal_weight():
     vw = run_replay(bars, scores, replace(sv, momentum=replace(sv.momentum, vol_weighting=True)))
     assert float((eq.daily - vw.daily).abs().sum()) > 0
     assert all(0 < t["weight"] <= 0.5 for t in vw.trades if t["engine"] == "momentum")
+
+
+# -- machine-learning ranking (v1.5.0-ml) ------------------------------------------------
+def _ml_params(**kw):
+    from dataclasses import replace
+    p = replace(make_version().momentum, llm_veto=False, ml_rank=True,
+                ml_train_rebalances=12, ml_min_rebalances=5)
+    return replace(p, **kw)
+
+
+@pytest.fixture(scope="module")
+def ml_market():
+    return make_market(n_days=760, trend_symbols=6, edge=0.0, seed=11)
+
+
+def test_ml_scores_use_only_past_closes(ml_market):
+    bars, _, _ = ml_market
+    close = st.pivot(bars, "close")
+    p = _ml_params()
+    i = max(st._rebalance_positions(close))
+    syms = list(close.columns)
+    a = st.ml_scores(close, i, syms, p)
+    assert a is not None
+    c2 = close.copy(); c2.iloc[i:] = c2.iloc[i:] * np.linspace(0.2, 5, c2.shape[1])
+    b = st.ml_scores(c2, i, syms, p)
+    pd.testing.assert_series_equal(a, b)
+
+
+def test_ml_falls_back_to_plain_momentum_without_enough_history(ml_market):
+    from dataclasses import replace
+    bars, _, _ = ml_market
+    close = st.pivot(bars, "close")
+    early = sorted(st._rebalance_positions(close))[12]   # too few labelled months yet
+    p = _ml_params(ml_min_rebalances=50)
+    assert st.ml_scores(close, early, list(close.columns), p) is None
+    elig = set(close.columns)
+    plain = st.rank_momentum(close, early, elig, set(), None, replace(p, ml_rank=False))
+    assert st.rank_momentum(close, early, elig, set(), None, p) == plain
+
+
+def test_ml_ranks_the_steady_climbers_first(ml_market):
+    bars, _, _ = ml_market
+    close = st.pivot(bars, "close")
+    p = _ml_params(top_n=6)
+    i = max(st._rebalance_positions(close))
+    picks = st.rank_momentum(close, i, set(close.columns), set(), None, p)
+    trend = {f"S{k:02d}" for k in range(6)}            # make_market gives S00-S05 an upward drift
+    assert len(set(picks) & trend) >= 5
+
+
+def test_ml_scores_are_repeatable(ml_market):
+    bars, _, _ = ml_market
+    close = st.pivot(bars, "close")
+    p = _ml_params()
+    i = max(st._rebalance_positions(close))
+    a = st.ml_scores(close, i, list(close.columns), p)
+    pd.testing.assert_series_equal(a, st.ml_scores(close, i, list(close.columns), p))
+
+
+def test_replay_with_ml_ranking_runs(ml_market):
+    from dataclasses import replace
+    bars, scores, _ = ml_market
+    sv = make_version(news_weight=0.0, momentum_weight=1.0)
+    sv = replace(sv, momentum=_ml_params())
+    res = run_replay(bars, scores, sv)
+    assert any(t["engine"] == "momentum" for t in res.trades)
+    assert np.isfinite(res.daily).all()
+
+
+def test_ml_version_is_a_candidate_not_the_active_one():
+    from engine.config import ACTIVE_VERSION, BUILTIN_VERSIONS, StrategyVersion, uses_llm
+    ml = BUILTIN_VERSIONS["v1.5.0-ml"]
+    assert ml.momentum.ml_rank and not ACTIVE_VERSION.momentum.ml_rank
+    assert not uses_llm(ml)
+    assert StrategyVersion.from_json(ml.to_json()) == ml
+    old = ACTIVE_VERSION.to_json()
+    for k in ("ml_rank", "ml_train_rebalances", "ml_min_rebalances"):
+        old["momentum"].pop(k)                           # versions saved before this change load fine
+    assert StrategyVersion.from_json(old) == ACTIVE_VERSION

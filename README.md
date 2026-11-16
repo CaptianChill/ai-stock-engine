@@ -3,6 +3,17 @@
 An LLM reads company news; rules decide what trades. Two engines, one risk agent with the final
 say, and audit gates that keep it on paper until the evidence is in.
 
+**Candidate (not trading): v1.5.0-ml (2026-11-16): v1.4.0 with a scikit-learn ranking model.**
+Instead of sorting stocks by the 12-1 return alone, gradient-boosted trees score each stock from five
+price features (12-1 and 6-1 momentum, last month's return, 63-day volatility, distance from the
+200-day average), each as a percentile across that day's stocks. The model is retrained on every
+rebalance from the last 36 months whose results were already known before the trading day, so the
+replay and the live runner pick the same names. With fewer than 24 known months it falls back to plain
+12-1. Trend filter, correlation cap and vol sizing are unchanged. To judge it:
+`python -m engine replay 2017-03-01 <last trading day> --version v1.5.0-ml`, then `audit` the run.
+It trades only if every gate passes and you switch `ACTIVE_VERSION` to it. Trying it counts as one
+more version for the overfitting gate.
+
 **Active version: v1.4.0 (since 2026-11-14): v1.3.0 plus volatility sizing.**
 Each pick's dollars are proportional to 1 / its 63-day daily volatility instead of equal dollars
 (capped at the 10% per-stock limit; anything capped off stays in cash). Same weights in replay and
@@ -82,6 +93,8 @@ The schedule runs on your own PC through Windows Task Scheduler (GitHub's schedu
 3. Check on things any time: `windows\status.cmd`. Logs are in the `logs` folder.
 
 The PC must be on, or asleep with wake timers allowed, on weekday mornings and afternoons.
+Both tasks start through `windows\hidden.vbs`, so no terminal window pops up. PCs set up
+earlier switch over on their own at the next tick (`windows\hide-tasks.ps1`; result in `logs\tick.log`).
 
 ## Setup on GitHub Actions (alternative)
 
