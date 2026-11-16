@@ -416,3 +416,37 @@ def test_vol_weighted_rebalance_buys_different_dollar_amounts():
     assert out["orders_submitted"] == r.sv.momentum.top_n
     w = db.get_stage(m1, "momentum_rebalanced")["detail"]["weights"]
     assert len(w) == r.sv.momentum.top_n and len({round(v, 6) for v in w.values()}) > 1
+
+
+def test_compare_prints_a_scoreboard_with_spy(monkeypatch, capsys):
+    import contextlib
+    from datetime import date
+    import engine.__main__ as m
+    from engine.audit.gates import GateResult
+
+    class FakeConn:
+        def execute(self, *a):
+            class R:
+                def fetchall(self_inner):
+                    return [{"day": date(2020, 1, 1 + k), "close": 100.0 + k} for k in range(5)]
+            return R()
+
+    class FakeDB:
+        @contextlib.contextmanager
+        def conn(self):
+            yield FakeConn()
+
+        def load_replay(self, run_id):
+            return {"metrics": {"total_return": 0.5 * run_id, "annual_return": 0.1, "max_drawdown": -0.3,
+                                "sharpe": 0.9}}
+
+    runs = iter([1, 2])
+    monkeypatch.setattr(m, "_db", lambda s: FakeDB())
+    monkeypatch.setattr(m, "cmd_replay", lambda a, s: next(runs))
+    monkeypatch.setattr(m, "cmd_audit", lambda a, s: [GateResult("x", True), GateResult("y", False)])
+    sent = []
+    monkeypatch.setattr("engine.notify.notify", lambda t, msg, *a: sent.append(msg))
+    m.main(["compare", "v1.4.0", "v1.5.0-ml", "--skip-fetch", "--start", "2020-01-01", "--end", "2020-01-10"])
+    out = capsys.readouterr().out
+    assert "v1.5.0-ml" in out and "hold SPY" in out and "1/2" in out
+    assert sent and "hold SPY" in sent[0]

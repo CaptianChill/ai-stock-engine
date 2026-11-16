@@ -10,6 +10,7 @@
   test-kill-switch                prove the kill switch and loss stop block entries
   tick [--stage S]                scheduler entry point (paper unless unlocked for live)
   research START END [--max-calls N] [--skip-fetch] [--batch]   the whole validation run in one go
+  compare [VERSIONS...] [--start D] [--skip-fetch]   trade versions over years of history side by side
   status                          gates, kill switch, open positions, latest equity
   kill "reason" / release         engage or release the kill switch
   brain                           nightly review: watchdog, scorer check, written review, proposals
@@ -252,6 +253,42 @@ def cmd_audit(a, s):
         db.save_audit(sv.version, a.run_id, g.gate, g.passed, g.detail)
         print(f"{'PASS' if g.passed else 'FAIL'}  {g.gate}")
     print(f"\n{sum(g.passed for g in gates)}/{len(gates)} replay gates passed")
+    return gates
+
+
+def cmd_compare(a, s):
+    """Trade each version over years of history as if live (costs included), audit each one,
+    and print a side-by-side scoreboard next to simply holding SPY. Also sent to the phone."""
+    from argparse import Namespace as N
+    from .notify import notify
+    from .replay import metrics
+    if not a.skip_fetch:
+        print(f"== fetch-bars {a.momentum_history_start} {a.end}")
+        cmd_fetch_bars(N(start=a.momentum_history_start, end=a.end, top=1500), s)
+    rows = []
+    for v in a.versions:
+        print(f"\n== replay {v} {a.start} -> {a.end}")
+        run_id = cmd_replay(N(start=a.start, end=a.end, version=v), s)
+        print(f"== audit {v} (run {run_id})")
+        gates = cmd_audit(N(run_id=run_id, momentum_history_start=a.momentum_history_start), s)
+        m = _db(s).load_replay(run_id)["metrics"]
+        m = json.loads(m) if isinstance(m, str) else m
+        rows.append((v, m, sum(g.passed for g in gates), len(gates)))
+    with _db(s).conn() as c:
+        spy = c.execute("select day, close from bars where symbol = 'SPY' and day between %s and %s "
+                        "order by day", (a.start, a.end)).fetchall()
+    if len(spy) > 1:
+        px = pd.Series([float(r["close"]) for r in spy], index=[r["day"] for r in spy])
+        rows.append(("hold SPY", metrics(px.pct_change().fillna(0.0)), None, None))
+    head = f"{'version':<12}{'total':>10}{'per year':>10}{'worst drop':>12}{'sharpe':>8}  gates"
+    lines = [head]
+    for v, m, ok, n in rows:
+        lines.append(f"{v:<12}{m.get('total_return', 0):>10.0%}{m.get('annual_return', 0):>10.1%}"
+                     f"{m.get('max_drawdown', 0):>12.0%}{m.get('sharpe', 0):>8.2f}  "
+                     + (f"{ok}/{n}" if n else "-"))
+    table = "\n".join(lines)
+    print(f"\n== {a.start} to {a.end}, costs included\n{table}")
+    notify(f"Backtest {a.start.year}-{a.end.year}", table)
 
 
 def cmd_paper_gates(a, s):
@@ -392,6 +429,13 @@ def main(argv=None):
     p.add_argument("end", type=date.fromisoformat)
     p.add_argument("--top", type=int, default=1500, help="most-traded symbols to keep (default 1500)")
     p.set_defaults(fn=cmd_fetch_bars)
+    p = sub.add_parser("compare", help="trade versions over years of history side by side, then audit")
+    p.add_argument("versions", nargs="*", default=["v1.4.0", "v1.5.0-ml"])
+    p.add_argument("--start", type=date.fromisoformat, default=date(2017, 3, 1))
+    p.add_argument("--end", type=date.fromisoformat, default=_last_weekday())
+    p.add_argument("--momentum-history-start", type=date.fromisoformat, default=date(2016, 1, 1))
+    p.add_argument("--skip-fetch", action="store_true", help="use price history already downloaded")
+    p.set_defaults(fn=cmd_compare)
     sub.add_parser("paper-gates").set_defaults(fn=cmd_paper_gates)
     sub.add_parser("test-kill-switch").set_defaults(fn=cmd_test_kill_switch)
     p = sub.add_parser("tick"); p.add_argument("--stage", choices=["premarket", "exits", "close"]); p.set_defaults(fn=cmd_tick)
