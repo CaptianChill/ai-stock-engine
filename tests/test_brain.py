@@ -123,3 +123,10 @@ def test_review_parser_survives_garbage():
 def test_version_roundtrip():
     sv = ACTIVE_VERSION
     assert StrategyVersion.from_json(sv.to_json()) == sv
+
+
+def test_scorer_with_no_real_edge_is_not_called_working():
+    bars, scores, _ = make_market(edge=0.0)
+    q = brain.scorer_quality(scores, bars, make_version())
+    if "spread_t" in q and abs(q["spread_t"] or 0) < 2:
+        assert q["working"] is False and q["verdict"] == "no edge (noise)"
