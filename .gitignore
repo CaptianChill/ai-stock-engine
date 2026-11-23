@@ -3,3 +3,8 @@ __pycache__/
 *.pyc
 .pytest_cache/
 replay.json
+# keep every env/secret file out of this PUBLIC repo (only the example is shared)
+.env*
+!.env.example
+*secret*
+*.key

@@ -69,7 +69,11 @@ def scorer_quality(scores: pd.DataFrame, bars: pd.DataFrame, sv: StrategyVersion
     if len(good) >= 25 and len(bad) >= 25:
         spread = float(good.mean() - bad.mean())
         se = float(np.sqrt(good.var(ddof=1) / len(good) + bad.var(ddof=1) / len(bad)))
-        out.update(spread=spread, spread_t=spread / se if se > 0 else None, working=spread > 0)
+        t = spread / se if se > 0 else None
+        # "working" means a real edge: good beats bad by at least ~2 standard errors.
+        # A positive spread with t near 0 is noise, not a working scorer.
+        out.update(spread=spread, spread_t=t, working=bool(t is not None and t >= 2),
+                   verdict="edge" if (t or 0) >= 2 else ("reversed" if (t or 0) <= -2 else "no edge (noise)"))
     return out
 
 
@@ -160,14 +164,20 @@ def llm_review(facts: dict, sv: StrategyVersion, api_key: str | None, model: str
     import anthropic
     client = anthropic.Anthropic(api_key=api_key)
     current = {k: sv.get_param(k) for k in ALLOWED_PARAMS}
+    # Newer models may think first by default and spend the whole budget before writing the JSON
+    # (every review since 2026-11-16 came back "unreadable"). The review needs no thinking: switch
+    # it off (sent as extra_body so any SDK version accepts it) and give the JSON room.
     msg = client.messages.create(
-        model=model, max_tokens=1500, system=SYSTEM,
+        model=model, max_tokens=4000, system=SYSTEM, extra_body={"thinking": {"type": "disabled"}},
         messages=[{"role": "user", "content": PROMPT.format(
             facts=json.dumps(facts, default=str)[:30000],
             allowed=json.dumps({k: [v[0], v[1]] for k, v in ALLOWED_PARAMS.items()}),
             current=json.dumps(current))}])
     text = "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
-    return parse_review(text)
+    review = parse_review(text)
+    if not review.get("llm"):
+        review["stop_reason"] = getattr(msg, "stop_reason", None)
+    return review
 
 
 def parse_review(text: str) -> dict:
